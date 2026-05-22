@@ -1,0 +1,19 @@
+{
+  "name": "Shadow Chat — Encrypted P2P Transfer",
+  "short_name": "ShadowChat",
+  "description": "Zero-knowledge encrypted peer-to-peer file transfer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0E1A",
+  "theme_color": "#3B82F6",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/globe.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "utilities"]
+}

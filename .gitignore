@@ -1,0 +1,55 @@
+# ─── System / OS Artifacts ───
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.swp
+
+# ─── IDEs and Editors ───
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+go.work
+
+# ─── Go Backend ───
+backend/server.exe
+backend/server
+backend/bin/
+backend/dist/
+backend/*.log
+backend/coverage.txt
+backend/profile.out
+
+# ─── Frontend Next.js ───
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnp*
+frontend/.eslintcache
+frontend/tsconfig.tsbuildinfo
+
+# ─── Infrastructure and Secrets ───
+.env
+.env.*
+!.env.example
+infrastructure/certs/fullchain.pem
+infrastructure/certs/privkey.pem
+infrastructure/certs/*.key
+infrastructure/certs/*.crt
+infrastructure/certs/*.csr
+infrastructure/certs/*.pem
+
+# ─── Docker and Databases ───
+postgres-data/
+redis-data/
+docker-compose.override.yml

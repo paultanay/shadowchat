@@ -1,0 +1,83 @@
+name: ShadowChat CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ─── Go Backend Check ───
+  backend-ci:
+    name: Go Backend CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          go mod download
+
+      - name: Run Go vet & format check
+        run: |
+          cd backend
+          go vet ./...
+          # Ensure code is formatted correctly
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Go code is not formatted. Run 'go fmt ./...'"
+            exit 1
+          fi
+
+      - name: Build Go Backend
+        run: |
+          cd backend
+          go build -v ./...
+
+      - name: Run Backend Tests
+        run: |
+          cd backend
+          go test -v -race ./...
+
+  # ─── Frontend Next.js Check ───
+  frontend-ci:
+    name: Frontend Next.js CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Strict TypeScript Compilation
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: Lint Verification
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Build Next.js Production Package
+        run: |
+          cd frontend
+          npm run build
