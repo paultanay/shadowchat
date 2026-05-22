@@ -32,8 +32,25 @@ export class SignalingClient {
   private isDisconnecting = false;
 
   constructor(roomId: string, token: string) {
-    // Determine signaling WebSocket URL (support relative and absolute configs)
-    const wsBase = process.env.NEXT_PUBLIC_WS_URL || 'wss://api.shadowchat.local/ws';
+    // Determine signaling WebSocket URL (support relative and absolute configs dynamically)
+    let wsBase = '';
+    
+    if (typeof window !== 'undefined') {
+      const host = window.location.host;
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('shadowchat.local')) {
+        if (host.includes(':3000')) {
+          wsBase = `${wsProtocol}//${window.location.hostname}:8080/ws`;
+        } else {
+          wsBase = `${wsProtocol}//${host}/ws`;
+        }
+      }
+    }
+    
+    if (!wsBase) {
+      wsBase = process.env.NEXT_PUBLIC_WS_URL || 'wss://api.shadowchat.local/ws';
+    }
+    
     this.url = `${wsBase}?room=${roomId}&token=${token}`;
   }
 

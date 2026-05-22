@@ -26,7 +26,19 @@ import {
 import { FileTransferCoordinator } from '@/lib/engines/transfer';
 import { useUIStore } from './uiStore';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1';
+const getApiBase = () => {
+  if (typeof window !== 'undefined') {
+    const host = window.location.host;
+    const protocol = window.location.protocol;
+    if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('shadowchat.local')) {
+      if (host.includes(':3000')) {
+        return `${protocol}//${window.location.hostname}:8080/api/v1`;
+      }
+      return `${protocol}//${host}/api/v1`;
+    }
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1';
+};
 
 export interface Peer {
   id: string;
@@ -113,7 +125,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     // 1. Fetch ephemeral TURN credentials from backend REST route
     let iceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
     try {
-      const turnRes = await fetch(`${API_BASE}/turn/credentials`, {
+      const turnRes = await fetch(`${getApiBase()}/turn/credentials`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (turnRes.ok) {
@@ -258,7 +270,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         peer_id: generatedPeerId,
       };
 
-      const res = await fetch(`${API_BASE}/rooms`, {
+      const res = await fetch(`${getApiBase()}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -296,7 +308,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     joinRoom: async (roomCode) => {
       const generatedPeerId = window.crypto.randomUUID();
 
-      const res = await fetch(`${API_BASE}/rooms/join`, {
+      const res = await fetch(`${getApiBase()}/rooms/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -666,7 +678,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
-      const res = await fetch(`${API_BASE}/rooms/${roomId}/lock`, {
+      const res = await fetch(`${getApiBase()}/rooms/${roomId}/lock`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -685,7 +697,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
-      const res = await fetch(`${API_BASE}/rooms/${roomId}/unlock`, {
+      const res = await fetch(`${getApiBase()}/rooms/${roomId}/unlock`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -704,7 +716,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
-      const res = await fetch(`${API_BASE}/rooms/${roomId}`, {
+      const res = await fetch(`${getApiBase()}/rooms/${roomId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

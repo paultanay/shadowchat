@@ -8,7 +8,8 @@ import {
   Key, 
   Lock, 
   ArrowRight, 
-  Layers 
+  Layers,
+  QrCode
 } from "lucide-react";
 import { 
   pageTransition, 
@@ -19,6 +20,7 @@ import {
 import { useRoomStore } from "@/stores/roomStore";
 import { useUIStore } from "@/stores/uiStore";
 import { generateFileKey, encryptText, bytesToBase64 } from "@/lib/engines/crypto";
+import QRScannerModal from "@/components/QRScannerModal";
 
 export default function Home() {
   const { createRoom, joinRoom } = useRoomStore();
@@ -27,6 +29,44 @@ export default function Home() {
   const [roomCode, setRoomCode] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+  const handleScanSuccess = async (scannedRoomCode: string, scannedRoomKey?: string) => {
+    setRoomCode(scannedRoomCode);
+    setIsJoining(true);
+
+    try {
+      // 1. Join room (requests guest token)
+      const roomId = await joinRoom(scannedRoomCode);
+
+      showToast({
+        type: "success",
+        title: "Access Granted",
+        message: "Synchronizing security tokens. Joining lobby...",
+      });
+
+      // Cache token and role in sessionStorage
+      sessionStorage.setItem(`token_${roomId}`, useRoomStore.getState().token || "");
+      sessionStorage.setItem(`role_${roomId}`, "member");
+
+      if (scannedRoomKey) {
+        sessionStorage.setItem(`key_${roomId}`, scannedRoomKey);
+      }
+
+      setTimeout(() => {
+        const hashPart = scannedRoomKey ? `#key=${scannedRoomKey}` : "";
+        window.location.href = `/room/${roomId}${hashPart}`;
+      }, 1000);
+
+    } catch (err: any) {
+      showToast({
+        type: "error",
+        title: "Access Denied",
+        message: err.message || "Invalid room code or room is full.",
+      });
+      setIsJoining(false);
+    }
+  };
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,9 +178,7 @@ export default function Home() {
       {/* ─── Header ─── */}
       <header className="relative z-10 w-full max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent-primary/10 border border-accent-primary/30 shadow-glow">
-            <span className="text-xl font-bold text-accent-primary">🜏</span>
-          </div>
+          <img src="/logo.png" alt="ShadowChat Logo" className="w-10 h-10 object-contain rounded-xl border border-accent-primary/30 shadow-glow" />
           <span className="text-lg font-bold tracking-wider text-text-primary uppercase">ShadowChat</span>
         </div>
         <div className="flex items-center gap-4">
@@ -253,9 +291,18 @@ export default function Home() {
                     value={roomCode}
                     onChange={(e) => setRoomCode(e.target.value)}
                     disabled={isCreating || isJoining}
-                    className="w-full px-4 py-3 bg-bg-secondary/50 border border-border-glass rounded-xl text-text-primary placeholder:text-text-muted text-sm font-mono tracking-widest focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all disabled:opacity-50"
+                    className="w-full pl-4 pr-16 py-3 bg-bg-secondary/50 border border-border-glass rounded-xl text-text-primary placeholder:text-text-muted text-sm font-mono tracking-widest focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all disabled:opacity-50"
                   />
-                  <div className="absolute inset-y-0 right-3 flex items-center">
+                  <div className="absolute inset-y-0 right-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsScannerOpen(true)}
+                      disabled={isCreating || isJoining}
+                      className="p-1.5 hover:bg-bg-tertiary rounded-lg border border-transparent hover:border-border-glass text-accent-primary transition-all cursor-pointer flex items-center justify-center"
+                      title="Scan QR Code"
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </button>
                     <Key className="w-4 h-4 text-text-muted" />
                   </div>
                 </div>
@@ -340,6 +387,12 @@ export default function Home() {
           <a href="#" className="hover:text-text-secondary transition-all">GitHub</a>
         </div>
       </footer>
+      
+      <QRScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+      />
     </main>
   );
 }

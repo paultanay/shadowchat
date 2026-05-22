@@ -1,0 +1,8 @@
+server
+server.exe
+.env
+.env*.local
+.git
+.github
+node_modules
+*.log

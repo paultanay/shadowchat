@@ -1,11 +1,9 @@
-version: '3.9'
-
 services:
   # ─── PostgreSQL Database ───
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_DB: shadowchat
       POSTGRES_USER: shadow
@@ -23,7 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
@@ -86,11 +84,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_WS_URL: wss://api.shadowchat.local/ws
+        NEXT_PUBLIC_API_URL: https://api.shadowchat.local/api/v1
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_WS_URL=wss://api.shadowchat.local/ws
-      - NEXT_PUBLIC_API_URL=https://api.shadowchat.local
     depends_on:
       - signaling
 

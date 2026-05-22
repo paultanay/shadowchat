@@ -78,23 +78,28 @@ shadowchat/
 
 ## 🚀 Local Quickstart (Docker Compose)
 
-The fastest and most robust way to run ShadowChat locally is utilizing the Docker-Compose orchestration. This spins up the Nginx proxy, PostgreSQL, Redis, NATS, Coturn, frontend, and backend services.
+The fastest and most robust way to run ShadowChat locally is using Docker Compose. This spins up Nginx, PostgreSQL, Redis, NATS, Coturn, and the Next.js frontend/Go backend services.
 
-### 1. Configure OS DNS Mapping
-Map the local domains in your OS hosts file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`):
-```text
-127.0.0.1 shadowchat.local
-127.0.0.1 api.shadowchat.local
-```
-
-### 2. Boot Up Docker Stack
-Ensure your **Docker Desktop / Docker Engine** is active, then run:
+### 1. Boot Up Docker Stack
+Ensure **Docker Desktop / Docker Engine** is active, then run:
 ```bash
 docker-compose up --build -d
 ```
 
-### 3. Open ShadowChat
-Open your browser and navigate to `https://shadowchat.local`. High-fidelity, self-signed SSL/TLS termination is managed transparently by the Nginx proxy.
+### 2. Open ShadowChat
+Open your browser and navigate to **`https://localhost`** (or `https://127.0.0.1`). 
+High-fidelity, self-signed SSL/TLS termination is managed transparently by Nginx. 
+
+> [!NOTE]
+> Since we use self-signed certificates for secure local TLS, your browser will show a standard certificate warning. You can safely proceed/bypass it.
+
+### Optional: Custom DNS Mapping
+If you prefer using custom local domains instead of `localhost`, add the following to your system hosts file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`):
+```text
+127.0.0.1 shadowchat.local
+127.0.0.1 api.shadowchat.local
+```
+Then navigate to `https://shadowchat.local`.
 
 ---
 

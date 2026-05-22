@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import ClientProviders from "@/components/ClientProviders";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -29,7 +30,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full scroll-smooth">
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans min-h-full bg-bg-primary text-text-primary antialiased selection:bg-accent-primary/30 selection:text-white`}>
-        {children}
+        <ClientProviders>
+          {children}
+        </ClientProviders>
       </body>
     </html>
   );

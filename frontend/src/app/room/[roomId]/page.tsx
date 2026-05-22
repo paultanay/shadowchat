@@ -24,9 +24,11 @@ import {
   FileText,
   Clock,
   LogOut,
-  Sparkles
+  Sparkles,
+  QrCode
 } from "lucide-react";
 import { bytesToBase64 } from "@/lib/engines/crypto";
+import QRCodeModal from "@/components/QRCodeModal";
 
 interface PageProps {
   params: Promise<{ roomId: string }>;
@@ -49,6 +51,7 @@ export default function RoomPage({ params }: PageProps) {
     activeTransfers,
     connectSignaling,
     disconnectRoom,
+    joinRoom,
     sendChatMessage,
     lockRoom,
     unlockRoom,
@@ -72,6 +75,7 @@ export default function RoomPage({ params }: PageProps) {
   const [inputText, setInputText] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -80,7 +84,7 @@ export default function RoomPage({ params }: PageProps) {
     if (!roomId) return;
     
     // Check if we already have a token in local state (which means we joined/created from landing)
-    // If not (e.g. direct page refresh), try loading from storage or redirect to join/create
+    // If not (e.g. direct page refresh), try loading from storage or auto-join from room code
     const initialize = async () => {
       const activeToken = token || sessionStorage.getItem(`token_${roomId}`);
       const activeRole = roomRole || (sessionStorage.getItem(`role_${roomId}`) as 'owner' | 'member');
@@ -92,15 +96,65 @@ export default function RoomPage({ params }: PageProps) {
 
         await connectSignaling(roomId, activeToken, activeRole);
       } else {
-        // Missing auth token, redirect to landing home page
-        showToast({
-          type: "warning",
-          title: "Session Expired",
-          message: "No active room session token found. Redirecting to lobby...",
-        });
-        setTimeout(() => {
-          window.location.href = "/";
-        }, 2000);
+        // No token in session storage - try to auto-join using the room code/UUID
+        try {
+          let targetCode = roomId;
+          
+          // Check if roomId is a UUID (length 36)
+          if (roomId.length === 36) {
+            // Get API Base dynamically
+            const apiBase = typeof window !== 'undefined'
+              ? (window.location.host.includes('localhost') || window.location.host.includes('127.0.0.1') || window.location.host.includes('shadowchat.local')
+                ? `${window.location.protocol}//${window.location.host.includes(':3000') ? window.location.hostname + ':8080' : window.location.host}/api/v1`
+                : process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1')
+              : 'https://api.shadowchat.local/api/v1';
+
+            const res = await fetch(`${apiBase}/rooms/${roomId}`);
+            if (res.ok) {
+              const metadata = await res.json();
+              if (metadata && metadata.room_code) {
+                targetCode = metadata.room_code;
+              }
+            }
+          }
+
+          showToast({
+            type: "info",
+            title: "Resolving Secure Chamber...",
+            message: "Negotiating keys and establishing guest handshake...",
+          });
+
+          // Join the room using targetCode
+          const realRoomId = await joinRoom(targetCode);
+          
+          // Get the new token/role from the store state
+          const newState = useRoomStore.getState();
+          const newToken = newState.token;
+          const newRole = newState.roomRole;
+
+          if (newToken && newRole) {
+            sessionStorage.setItem(`token_${realRoomId}`, newToken);
+            sessionStorage.setItem(`role_${realRoomId}`, newRole);
+
+            // Update the URL to the real room ID if it is currently a room code
+            if (window.location.pathname !== `/room/${realRoomId}`) {
+              window.history.replaceState({}, '', `/room/${realRoomId}${window.location.hash}`);
+            }
+
+            await connectSignaling(realRoomId, newToken, newRole);
+          } else {
+            throw new Error("Failed to retrieve join tokens from server");
+          }
+        } catch (err: any) {
+          showToast({
+            type: "error",
+            title: "Access Denied",
+            message: err.message || "Failed to join chamber. Room may be locked, expired, or full.",
+          });
+          setTimeout(() => {
+            window.location.href = "/";
+          }, 3000);
+        }
       }
     };
 
@@ -224,6 +278,43 @@ export default function RoomPage({ params }: PageProps) {
     ...details,
   }));
 
+  const getInviteUrl = () => {
+    if (typeof window === "undefined") return "";
+    const hash = window.location.hash || "";
+    return `${window.location.origin}/room/${roomCode || roomId}${hash}`;
+  };
+
+  if (!token) {
+    return (
+      <div className="relative min-h-screen flex items-center justify-center bg-bg-primary text-text-primary overflow-hidden">
+        {/* Geometric Background Glows */}
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-accent-primary/5 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-10 right-1/4 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+
+        <div className="relative z-10 sc-glass border border-border-glass p-8 rounded-3xl max-w-md w-full mx-4 text-center space-y-6">
+          <div className="flex justify-center">
+            <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/30">
+              <Shield className="w-8 h-8 text-accent-primary animate-pulse" />
+              <div className="absolute inset-0 rounded-2xl border border-accent-primary/50 animate-ping opacity-25" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold tracking-tight">Resolving Secure Chamber</h2>
+            <p className="text-sm text-text-secondary leading-relaxed">
+              Negotiating client-side keys and establishing end-to-end encrypted room handshake...
+            </p>
+          </div>
+          <div className="flex justify-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-primary animate-bounce [animation-delay:-0.3s]" />
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-primary animate-bounce [animation-delay:-0.15s]" />
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-primary animate-bounce" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen flex flex-col bg-bg-primary text-text-primary overflow-hidden">
       {/* ─── Geometric Background Glows ─── */}
@@ -242,9 +333,7 @@ export default function RoomPage({ params }: PageProps) {
           </button>
           
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent-primary/10 border border-accent-primary/30">
-              <span className="font-bold text-accent-primary">🜏</span>
-            </div>
+            <img src="/logo.png" alt="ShadowChat Logo" className="w-8 h-8 object-contain rounded-lg border border-accent-primary/30 shadow-glow" />
             <div className="flex flex-col">
               <span className="text-xs text-text-muted font-bold tracking-widest uppercase">Secure Chamber</span>
               <span className="text-sm font-mono font-bold text-text-primary flex items-center gap-1.5">
@@ -255,6 +344,13 @@ export default function RoomPage({ params }: PageProps) {
                   title="Copy Invite Link"
                 >
                   <Copy className="w-3.5 h-3.5" />
+                </button>
+                <button 
+                  onClick={() => setIsQRModalOpen(true)}
+                  className="p-1 hover:text-accent-primary transition-colors cursor-pointer"
+                  title="Show Invite QR"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
                 </button>
               </span>
             </div>
@@ -377,12 +473,20 @@ export default function RoomPage({ params }: PageProps) {
                 {activePeerList.length === 0 && (
                   <div className="p-4 bg-bg-secondary/20 border border-dashed border-border-glass rounded-xl text-center">
                     <p className="text-xs text-text-muted">Waiting for peers to join...</p>
-                    <button 
-                      onClick={handleCopyLink}
-                      className="mt-2 text-xs font-bold text-accent-primary hover:underline flex items-center gap-1 mx-auto cursor-pointer"
-                    >
-                      Invite Peer <ChevronRight className="w-3 h-3" />
-                    </button>
+                    <div className="mt-2 flex items-center justify-center gap-4">
+                      <button 
+                        onClick={handleCopyLink}
+                        className="text-xs font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        Invite Peer <ChevronRight className="w-3 h-3" />
+                      </button>
+                      <button 
+                        onClick={() => setIsQRModalOpen(true)}
+                        className="text-xs font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        Show QR <QrCode className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -669,6 +773,13 @@ export default function RoomPage({ params }: PageProps) {
           ))}
         </AnimatePresence>
       </div>
+      {/* ─── Ephemeral Room Invite QR Code Modal ─── */}
+      <QRCodeModal 
+        isOpen={isQRModalOpen}
+        onClose={() => setIsQRModalOpen(false)}
+        url={getInviteUrl()}
+        roomCode={roomCode || undefined}
+      />
     </div>
   );
 }
