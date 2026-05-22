@@ -97,25 +97,58 @@ export class PeerConnectionManager {
   }
 
   public async handleOffer(sdp: string): Promise<void> {
-    if (!this.pc) return;
+    if (!this.pc) {
+      console.warn(`[PeerConnectionManager] Cannot handle SDP offer, RTCPeerConnection is null for peer: ${this.peerId}`);
+      return;
+    }
     
-    await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-    const answer = await this.pc.createAnswer();
-    await this.pc.setLocalDescription(answer);
+    console.log(`[PeerConnectionManager] Handling inbound SDP Offer from peer ${this.peerId}. Current signalingState: ${this.pc.signalingState}`);
+    try {
+      await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+      console.log(`[PeerConnectionManager] SetRemoteDescription (Offer) successful. Creating answer...`);
+      const answer = await this.pc.createAnswer();
+      console.log(`[PeerConnectionManager] Created SDP Answer. Setting local description...`);
+      await this.pc.setLocalDescription(answer);
+      console.log(`[PeerConnectionManager] SetLocalDescription (Answer) successful. Relaying SDP Answer via signaling...`);
 
-    this.signaling.send('answer', this.roomId, this.peerId, {
-      sdp: answer.sdp,
-    });
+      this.signaling.send('answer', this.roomId, this.peerId, {
+        sdp: answer.sdp,
+      });
+    } catch (err) {
+      console.error(`[PeerConnectionManager] Error during handleOffer for peer ${this.peerId}:`, err);
+      throw err;
+    }
   }
 
   public async handleAnswer(sdp: string): Promise<void> {
-    if (!this.pc) return;
-    await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+    if (!this.pc) {
+      console.warn(`[PeerConnectionManager] Cannot handle SDP answer, RTCPeerConnection is null for peer: ${this.peerId}`);
+      return;
+    }
+    
+    console.log(`[PeerConnectionManager] Handling inbound SDP Answer from peer ${this.peerId}. Current signalingState: ${this.pc.signalingState}`);
+    try {
+      await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+      console.log(`[PeerConnectionManager] SetRemoteDescription (Answer) successful for peer: ${this.peerId}`);
+    } catch (err) {
+      console.error(`[PeerConnectionManager] Error during handleAnswer for peer ${this.peerId}:`, err);
+      throw err;
+    }
   }
 
   public async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    if (!this.pc) return;
-    await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    if (!this.pc) {
+      console.warn(`[PeerConnectionManager] Cannot add ICE candidate, RTCPeerConnection is null for peer: ${this.peerId}`);
+      return;
+    }
+    
+    console.log(`[PeerConnectionManager] Applying ICE Candidate from peer ${this.peerId}...`);
+    try {
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      console.log(`[PeerConnectionManager] Successfully applied ICE Candidate for peer ${this.peerId}`);
+    } catch (err) {
+      console.warn(`[PeerConnectionManager] Ignored/failed ICE candidate for peer ${this.peerId}:`, err);
+    }
   }
 
   public close(): void {

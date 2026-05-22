@@ -437,7 +437,7 @@ export default function RoomPage({ params }: PageProps) {
                   <div className="flex items-center gap-3">
                     <div className="w-2.5 h-2.5 rounded-full bg-accent-primary animate-pulse" />
                     <div className="flex flex-col">
-                      <span className="text-xs font-bold">You (Initiator)</span>
+                      <span className="text-xs font-bold">You {roomRole === 'owner' ? '(Initiator)' : '(Guest)'}</span>
                       <span className="text-[10px] font-mono text-text-muted">{peerId?.substring(0, 8)}</span>
                     </div>
                   </div>
