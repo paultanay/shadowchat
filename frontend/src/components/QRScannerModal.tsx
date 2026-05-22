@@ -181,7 +181,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                   <Camera className="w-5 h-5 text-accent-primary" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-text-primary">Chamber Scan</h3>
+                  <h3 className="text-lg font-bold text-text-primary">Room Scan</h3>
                   <p className="text-[10px] font-bold tracking-widest text-text-muted uppercase">
                     Scan invite QR code
                   </p>
@@ -228,7 +228,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                       {/* Moving laser scanner line */}
                       {isScanning && (
                         <motion.div
-                          className="absolute left-0 right-0 h-0.5 bg-accent-primary shadow-[0_0_8px_#00f0ff]"
+                          className="absolute left-0 right-0 h-0.5 bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
                           animate={{ top: ["4%", "96%", "4%"] }}
                           transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
                         />

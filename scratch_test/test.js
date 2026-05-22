@@ -43,13 +43,13 @@ async function runTest() {
     console.log('Page loaded. Capturing initial landing page screenshot...');
     await initiatorPage.screenshot({ path: path.join(ARTIFACT_DIR, 'landing_page.png') });
 
-    // Look for Create Secure Chamber button. In page.tsx:
+    // Look for Create Secure Room button. In page.tsx:
     // <motion.button type="submit" disabled={isCreating || isJoining} ...>
-    // Zap / "Create Secure Chamber"
-    console.log('Looking for "Create Secure Chamber" button...');
+    // Zap / "Create Secure Room"
+    console.log('Looking for "Create Secure Room" button...');
     const createButton = await initiatorPage.waitForSelector('button[type="submit"]', { timeout: 10000 });
     
-    console.log('Clicking "Create Secure Chamber" button...');
+    console.log('Clicking "Create Secure Room" button...');
     await Promise.all([
       initiatorPage.click('button[type="submit"]'),
       initiatorPage.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(e => {
@@ -73,7 +73,7 @@ async function runTest() {
       process.exit(1);
     }
 
-    console.log('Chamber created successfully! Key fragment is present in hash.');
+    console.log('Room created successfully! Key fragment is present in hash.');
 
     // ─── PART 2: Receiver (Peer) Joining ───
     console.log('Spawning receiver session (incognito context)...');
@@ -98,7 +98,7 @@ async function runTest() {
     await receiverPage.goto(initiatorUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
     // Wait for auto-joining to finish
-    console.log('Waiting for receiver to auto-join secure chamber...');
+    console.log('Waiting for receiver to auto-join secure room...');
     await new Promise(resolve => setTimeout(resolve, 8000));
 
     await receiverPage.screenshot({ path: path.join(ARTIFACT_DIR, 'receiver_room.png') });
@@ -106,43 +106,22 @@ async function runTest() {
     // ─── PART 3: Send E2EE Chat Message ───
     console.log('Testing pairwise E2EE Chat...');
     
-    // Switch Receiver to Chat tab in sidebar
-    console.log('Switching receiver to Chat tab...');
-    // Look for button containing "E2EE Chat Lobby" or similar
-    const receiverTabs = await receiverPage.$$('aside button');
-    let chatTabFound = false;
-    for (const tab of receiverTabs) {
-      const text = await receiverPage.evaluate(el => el.textContent, tab);
-      if (text.includes('Chat')) {
-        await tab.click();
-        chatTabFound = true;
-        break;
-      }
-    }
-
-    if (chatTabFound) {
-      console.log('Chat tab clicked. Waiting for transition...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    // Look for Chat Input (which is active by default in the unified lobby)
+    console.log('Looking for chat input element...');
+    const chatInput = await receiverPage.waitForSelector('input[placeholder*="message"]', { timeout: 10000 }).catch(() => null);
+    if (chatInput) {
+      console.log('Sending message: "Hello from Receiver!"');
+      await chatInput.type('Hello from Receiver!');
+      await receiverPage.keyboard.press('Enter');
       
-      // Look for Chat Input
-      console.log('Looking for chat input element...');
-      const chatInput = await receiverPage.waitForSelector('input[placeholder*="message"]', { timeout: 5000 }).catch(() => null);
-      if (chatInput) {
-        console.log('Sending message: "Hello from Receiver!"');
-        await chatInput.type('Hello from Receiver!');
-        await receiverPage.keyboard.press('Enter');
-        
-        // Wait for propagation
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        await initiatorPage.screenshot({ path: path.join(ARTIFACT_DIR, 'initiator_room_chat.png') });
-        await receiverPage.screenshot({ path: path.join(ARTIFACT_DIR, 'receiver_room_chat.png') });
-        console.log('Screenshots updated with Chat lobby!');
-      } else {
-        console.log('Could not locate chat input field.');
-      }
+      // Wait for propagation
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      await initiatorPage.screenshot({ path: path.join(ARTIFACT_DIR, 'initiator_room_chat.png') });
+      await receiverPage.screenshot({ path: path.join(ARTIFACT_DIR, 'receiver_room_chat.png') });
+      console.log('Screenshots updated with Chat lobby!');
     } else {
-      console.log('Could not find Chat tab in sidebar.');
+      console.log('Could not locate chat input field.');
     }
 
     // Write logs

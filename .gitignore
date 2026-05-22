@@ -53,3 +53,7 @@ infrastructure/certs/*.pem
 postgres-data/
 redis-data/
 docker-compose.override.yml
+
+# Tests
+
+scratch_test/

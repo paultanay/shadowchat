@@ -54,8 +54,13 @@ export interface ChatMessage {
   id: string;
   peerId: string;
   senderName: string; // "You" or peerId/truncated
-  text: string;
+  text?: string;
   timestamp: number;
+  type?: 'text' | 'file';
+  transferId?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
 }
 
 interface RoomState {
@@ -332,7 +337,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || 'Failed to create secure chamber');
+        throw new Error(errData.error || 'Failed to create secure room');
       }
 
       const data = await res.json();
@@ -373,7 +378,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || 'Failed to join secure chamber');
+        throw new Error(errData.error || 'Failed to join secure room');
       }
 
       const data = await res.json();
@@ -586,7 +591,23 @@ export const useRoomStore = create<RoomState>((set, get) => {
                           etaSec: 0,
                           status: 'pending',
                         });
-                        return { activeTransfers: updatedTransfers };
+
+                        const fileMsg: ChatMessage = {
+                          id: `msg-${trans.transferId}`,
+                          peerId: from,
+                          senderName: from.substring(0, 8),
+                          timestamp: Date.now(),
+                          type: 'file',
+                          transferId: trans.transferId,
+                          fileName: trans.fileName,
+                          fileSize: trans.sizeBytes,
+                          fileType: trans.fileType,
+                        };
+
+                        return { 
+                          activeTransfers: updatedTransfers,
+                          messages: [...s.messages, fileMsg]
+                        };
                       });
                       
                       useUIStore.getState().showToast({
@@ -777,7 +798,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         useUIStore.getState().showToast({
           type: 'info',
           title: 'Room Locked',
-          message: 'No new members can join this chamber.',
+          message: 'No new members can join this room.',
         });
       }
     },
@@ -814,7 +835,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         get().disconnectRoom();
         useUIStore.getState().showToast({
           type: 'success',
-          title: 'Chamber Destroyed',
+          title: 'Room Destroyed',
           message: 'Ephemeral credentials cleared. All secure metadata deleted.',
         });
         window.location.href = '/';
@@ -842,7 +863,23 @@ export const useRoomStore = create<RoomState>((set, get) => {
           etaSec: 0,
           status: 'pending',
         });
-        return { activeTransfers: updatedTransfers };
+
+        const fileMsg: ChatMessage = {
+          id: `msg-${tid}`,
+          peerId: s.peerId || '',
+          senderName: 'You',
+          timestamp: Date.now(),
+          type: 'file',
+          transferId: tid,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+        };
+
+        return { 
+          activeTransfers: updatedTransfers,
+          messages: [...s.messages, fileMsg]
+        };
       });
 
       return tid;

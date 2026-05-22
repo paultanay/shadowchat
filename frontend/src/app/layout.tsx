@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import ClientProviders from "@/components/ClientProviders";
 
@@ -11,6 +11,13 @@ const inter = Inter({
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
+});
+
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-serif",
+  subsets: ["latin"],
+  weight: ["400"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -29,7 +36,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full scroll-smooth">
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans min-h-full bg-bg-primary text-text-primary antialiased selection:bg-accent-primary/30 selection:text-white`}>
+      <body className={`${inter.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable} font-sans min-h-full bg-bg-primary text-text-primary antialiased selection:bg-accent-primary/30 selection:text-white`}>
         <ClientProviders>
           {children}
         </ClientProviders>

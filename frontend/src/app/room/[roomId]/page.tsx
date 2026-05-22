@@ -64,10 +64,8 @@ export default function RoomPage({ params }: PageProps) {
 
   const {
     sidebarOpen,
-    activeTab,
     notifications,
     toggleSidebar,
-    setActiveTab,
     showToast,
     dismissToast,
   } = useUIStore();
@@ -83,8 +81,6 @@ export default function RoomPage({ params }: PageProps) {
   useEffect(() => {
     if (!roomId) return;
     
-    // Check if we already have a token in local state (which means we joined/created from landing)
-    // If not (e.g. direct page refresh), try loading from storage or auto-join from room code
     const initialize = async () => {
       const activeToken = token || sessionStorage.getItem(`token_${roomId}`);
       const activeRole = roomRole || (sessionStorage.getItem(`role_${roomId}`) as 'owner' | 'member');
@@ -96,11 +92,10 @@ export default function RoomPage({ params }: PageProps) {
 
         await connectSignaling(roomId, activeToken, activeRole);
       } else {
-        // No token in session storage - try to auto-join using the room code/UUID
+        // Try auto-join using the room code/UUID
         try {
           let targetCode = roomId;
           
-          // Check if roomId is a UUID (length 36)
           if (roomId.length === 36) {
             // Get API Base dynamically
             const apiBase = typeof window !== 'undefined'
@@ -120,14 +115,12 @@ export default function RoomPage({ params }: PageProps) {
 
           showToast({
             type: "info",
-            title: "Resolving Secure Chamber...",
+            title: "Resolving Secure Room...",
             message: "Negotiating keys and establishing guest handshake...",
           });
 
-          // Join the room using targetCode
           const realRoomId = await joinRoom(targetCode);
           
-          // Get the new token/role from the store state
           const newState = useRoomStore.getState();
           const newToken = newState.token;
           const newRole = newState.roomRole;
@@ -136,7 +129,6 @@ export default function RoomPage({ params }: PageProps) {
             sessionStorage.setItem(`token_${realRoomId}`, newToken);
             sessionStorage.setItem(`role_${realRoomId}`, newRole);
 
-            // Update the URL to the real room ID if it is currently a room code
             if (window.location.pathname !== `/room/${realRoomId}`) {
               window.history.replaceState({}, '', `/room/${realRoomId}${window.location.hash}`);
             }
@@ -149,7 +141,7 @@ export default function RoomPage({ params }: PageProps) {
           showToast({
             type: "error",
             title: "Access Denied",
-            message: err.message || "Failed to join chamber. Room may be locked, expired, or full.",
+            message: err.message || "Failed to join room. Room may be locked, expired, or full.",
           });
           setTimeout(() => {
             window.location.href = "/";
@@ -171,13 +163,13 @@ export default function RoomPage({ params }: PageProps) {
   }, [messages]);
 
   const handleCopyLink = () => {
-    const link = `${window.location.origin}/room/${roomCode || roomId}`;
+    const link = `${window.location.origin}/room/${roomCode || roomId}${window.location.hash || ""}`;
     navigator.clipboard.writeText(link);
     setIsCopied(true);
     showToast({
       type: "success",
       title: "Link Copied",
-      message: "Chamber invitation URL copied to clipboard.",
+      message: "Room invitation URL copied to clipboard.",
     });
     setTimeout(() => setIsCopied(false), 2000);
   };
@@ -229,7 +221,6 @@ export default function RoomPage({ params }: PageProps) {
       return;
     }
 
-    // Start transfers to all connected peers
     peers.forEach(async (peer) => {
       if (peer.status === 'connected') {
         try {
@@ -271,7 +262,6 @@ export default function RoomPage({ params }: PageProps) {
     return `${mins}m ${secs}s remaining`;
   };
 
-  // Convert map to list for easy rendering
   const activePeerList = Array.from(peers.values());
   const activeTransferList = Array.from(activeTransfers.entries()).map(([tid, details]) => ({
     id: tid,
@@ -284,24 +274,23 @@ export default function RoomPage({ params }: PageProps) {
     return `${window.location.origin}/room/${roomCode || roomId}${hash}`;
   };
 
+  // Loading Screen redesign
   if (!token) {
     return (
       <div className="relative min-h-screen flex items-center justify-center bg-bg-primary text-text-primary overflow-hidden">
-        {/* Geometric Background Glows */}
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-accent-primary/5 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-10 right-1/4 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+        {/* Ambient mesh background */}
+        <div className="absolute -left-40 top-20 h-[500px] w-[500px] rounded-full bg-accent-glow opacity-25 blur-3xl spin-slow pointer-events-none" />
+        <div className="absolute -right-20 bottom-20 h-[450px] w-[450px] rounded-full bg-accent-warning/5 opacity-15 blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 sc-glass border border-border-glass p-8 rounded-3xl max-w-md w-full mx-4 text-center space-y-6">
+        <div className="relative z-10 sc-glass border border-border-glass p-8 rounded-3xl max-w-sm w-full mx-4 text-center space-y-6">
           <div className="flex justify-center">
-            <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/30">
-              <Shield className="w-8 h-8 text-accent-primary animate-pulse" />
-              <div className="absolute inset-0 rounded-2xl border border-accent-primary/50 animate-ping opacity-25" />
+            <div className="relative flex items-center justify-center w-14 h-14 rounded-2xl bg-bg-tertiary border border-border-glass shadow-elegant">
+              <Shield className="w-6 h-6 text-accent-primary animate-pulse" />
             </div>
           </div>
           <div className="space-y-2">
-            <h2 className="text-xl font-bold tracking-tight">Resolving Secure Chamber</h2>
-            <p className="text-sm text-text-secondary leading-relaxed">
+            <h2 className="text-lg font-bold tracking-tight">Resolving Room</h2>
+            <p className="text-xs text-text-secondary leading-relaxed font-sans">
               Negotiating client-side keys and establishing end-to-end encrypted room handshake...
             </p>
           </div>
@@ -317,25 +306,28 @@ export default function RoomPage({ params }: PageProps) {
 
   return (
     <div className="relative min-h-screen flex flex-col bg-bg-primary text-text-primary overflow-hidden">
-      {/* ─── Geometric Background Glows ─── */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-accent-primary/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+      {/* ─── Ambient Glows ─── */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -left-40 top-20 h-[500px] w-[500px] rounded-full bg-accent-glow opacity-20 blur-3xl spin-slow" />
+        <div className="absolute -right-20 bottom-20 h-[450px] w-[450px] rounded-full bg-accent-warning/5 opacity-10 blur-3xl" />
+      </div>
 
-      {/* ─── Header Dashboard ─── */}
-      <header className="relative z-10 w-full sc-glass border-b border-border-glass px-6 py-4 flex items-center justify-between">
+      {/* ─── Header ─── */}
+      <header className="relative z-10 w-full sc-glass border-b border-border-glass px-6 py-4 flex items-center justify-between shadow-elegant">
         <div className="flex items-center gap-4">
           <button 
             onClick={toggleSidebar} 
-            className="md:hidden p-2 rounded-lg bg-bg-secondary border border-border-glass hover:bg-bg-tertiary transition-all"
+            className="md:hidden p-2 rounded-lg bg-bg-tertiary border border-border-glass hover:bg-bg-secondary transition-all cursor-pointer"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-4 h-4" />
           </button>
           
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="ShadowChat Logo" className="w-8 h-8 object-contain rounded-lg border border-accent-primary/30 shadow-glow" />
+            <div className="w-8 h-8 rounded-lg bg-bg-tertiary border border-border-glass flex items-center justify-center">
+              <Shield className="w-4.5 h-4.5 text-accent-primary" />
+            </div>
             <div className="flex flex-col">
-              <span className="text-xs text-text-muted font-bold tracking-widest uppercase">Secure Chamber</span>
+              <span className="text-[9px] text-text-muted font-mono font-bold tracking-widest uppercase">Secure Room</span>
               <span className="text-sm font-mono font-bold text-text-primary flex items-center gap-1.5">
                 {roomCode || roomId?.substring(0, 8)}
                 <button 
@@ -343,30 +335,30 @@ export default function RoomPage({ params }: PageProps) {
                   className="p-1 hover:text-accent-primary transition-colors cursor-pointer"
                   title="Copy Invite Link"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3 h-3 text-text-muted hover:text-accent-primary" />
                 </button>
                 <button 
                   onClick={() => setIsQRModalOpen(true)}
                   className="p-1 hover:text-accent-primary transition-colors cursor-pointer"
                   title="Show Invite QR"
                 >
-                  <QrCode className="w-3.5 h-3.5" />
+                  <QrCode className="w-3 h-3 text-text-muted hover:text-accent-primary" />
                 </button>
               </span>
             </div>
           </div>
         </div>
 
-        {/* Network & Session Status Indicator */}
+        {/* Network & Session Status */}
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-bg-secondary border border-border-glass text-xs text-text-secondary">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-bg-secondary/60 border border-border-glass text-[10px] font-mono uppercase tracking-wider text-text-secondary">
             <Shield className="w-3.5 h-3.5 text-accent-success" />
-            <span className="font-medium">End-to-End Encrypted</span>
+            <span>Encrypted Tunnel</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider">
             <span className={`w-2 h-2 rounded-full ${signalingState === 'connected' ? 'bg-accent-success animate-pulse' : 'bg-accent-warning animate-pulse'}`} />
-            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider hidden xs:inline">
+            <span className="text-text-secondary hidden xs:inline">
               {signalingState}
             </span>
           </div>
@@ -376,10 +368,10 @@ export default function RoomPage({ params }: PageProps) {
               disconnectRoom();
               window.location.href = "/";
             }}
-            className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-accent-danger hover:bg-red-500/20 transition-all cursor-pointer"
-            title="Leave Chamber"
+            className="p-2 rounded-lg bg-bg-tertiary border border-border-glass text-accent-danger hover:bg-red-500/10 hover:border-red-500/30 transition-all cursor-pointer"
+            title="Leave Room"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
           </button>
         </div>
       </header>
@@ -387,35 +379,62 @@ export default function RoomPage({ params }: PageProps) {
       {/* ─── Main Interface ─── */}
       <div className="flex-grow flex relative z-10 overflow-hidden">
         
+        {/* ─── Mobile Sidebar Backdrop Overlay ─── */}
+        <AnimatePresence>
+          {sidebarOpen && (
+            <motion.div 
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={toggleSidebar}
+            />
+          )}
+        </AnimatePresence>
+
         {/* ─── Sidebar Panel ─── */}
-        <aside className={`absolute md:relative z-20 h-full w-80 sc-glass border-r border-border-glass flex flex-col justify-between transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <aside className={`fixed md:relative z-50 h-full w-80 bg-bg-tertiary md:bg-bg-glass/80 backdrop-blur-lg border-r border-border-glass flex flex-col justify-between transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
           <div className="p-6 space-y-6 flex-grow overflow-y-auto">
+            {/* Mobile Sidebar Close Header */}
+            <div className="flex items-center justify-between md:hidden pb-4 border-b border-border-glass">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4.5 h-4.5 text-accent-primary" />
+                <span className="font-mono text-xs uppercase tracking-wider text-text-primary">Room Menu</span>
+              </div>
+              <button 
+                onClick={toggleSidebar}
+                className="p-1.5 rounded-lg bg-bg-secondary border border-border-glass text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+                title="Close Menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             
             {/* Owner Room Controls */}
             {roomRole === 'owner' && (
               <div className="space-y-3">
-                <h3 className="text-[10px] font-bold tracking-widest text-text-muted uppercase">Chamber Controls</h3>
-                <div className="grid grid-cols-2 gap-2">
+                <h3 className="text-[9px] font-mono font-bold tracking-widest text-text-muted uppercase">Room Controls</h3>
+                <div className="grid grid-cols-2 gap-2 font-mono text-xs">
                   {roomConfig?.is_locked ? (
                     <button 
                       onClick={unlockRoom}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass rounded-lg text-xs font-semibold text-text-primary transition-all cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-bg-secondary hover:bg-bg-primary border border-border-glass rounded-lg text-text-primary transition-all cursor-pointer"
                     >
                       <Unlock className="w-3.5 h-3.5 text-accent-warning" />
-                      Unlock Chamber
+                      Unlock
                     </button>
                   ) : (
                     <button 
                       onClick={lockRoom}
-                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-accent-primary/10 hover:bg-accent-primary/20 border border-accent-primary/30 rounded-lg text-xs font-semibold text-accent-primary transition-all cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 bg-bg-secondary hover:bg-bg-primary border border-border-glass rounded-lg text-text-primary transition-all cursor-pointer"
                     >
-                      <Lock className="w-3.5 h-3.5" />
-                      Lock Chamber
+                      <Lock className="w-3.5 h-3.5 text-accent-primary" />
+                      Lock
                     </button>
                   )}
                   <button 
                     onClick={destroyRoom}
-                    className="flex items-center justify-center gap-1.5 py-2 px-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-xs font-semibold text-accent-danger transition-all cursor-pointer"
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-lg text-accent-danger transition-all cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                     Destroy
@@ -427,33 +446,33 @@ export default function RoomPage({ params }: PageProps) {
             {/* Peer List */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-[10px] font-bold tracking-widest text-text-muted uppercase">Active Members ({peers.size + 1})</h3>
-                <Users className="w-4 h-4 text-text-muted" />
+                <h3 className="text-[9px] font-mono font-bold tracking-widest text-text-muted uppercase">Active Members ({peers.size + 1})</h3>
+                <Users className="w-3.5 h-3.5 text-text-muted" />
               </div>
 
               <div className="space-y-2">
                 {/* Local Peer card */}
-                <div className="p-3 bg-accent-primary/5 border border-accent-primary/20 rounded-xl flex items-center justify-between">
+                <div className="p-3 bg-bg-secondary/40 border border-border-glass rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-accent-primary animate-pulse" />
+                    <div className="w-2 h-2 rounded-full bg-accent-primary animate-pulse" />
                     <div className="flex flex-col">
-                      <span className="text-xs font-bold">You {roomRole === 'owner' ? '(Initiator)' : '(Guest)'}</span>
-                      <span className="text-[10px] font-mono text-text-muted">{peerId?.substring(0, 8)}</span>
+                      <span className="text-xs font-bold text-text-primary">You {roomRole === 'owner' ? '(Initiator)' : '(Guest)'}</span>
+                      <span className="text-[9px] font-mono text-text-muted">{peerId?.substring(0, 8)}</span>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded bg-accent-primary/10 text-accent-primary">
+                  <span className="px-2 py-0.5 text-[8px] font-mono font-bold uppercase tracking-wider rounded bg-accent-primary/10 text-accent-primary border border-accent-primary/20">
                     {roomRole}
                   </span>
                 </div>
 
                 {/* Remote Peers cards */}
                 {activePeerList.map((peer) => (
-                  <div key={peer.id} className="p-3 bg-bg-secondary/40 border border-border-glass rounded-xl flex items-center justify-between">
+                  <div key={peer.id} className="p-3 bg-bg-secondary/20 border border-border-glass rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`w-2.5 h-2.5 rounded-full ${peer.status === 'connected' ? 'bg-accent-success animate-pulse' : 'bg-accent-warning animate-pulse'}`} />
+                      <div className={`w-2 h-2 rounded-full ${peer.status === 'connected' ? 'bg-accent-success animate-pulse' : 'bg-accent-warning animate-pulse'}`} />
                       <div className="flex flex-col">
-                        <span className="text-xs font-bold">{peer.id.substring(0, 8)}</span>
-                        <span className="text-[10px] font-mono text-text-muted">{peer.presence}</span>
+                        <span className="text-xs font-bold text-text-primary">{peer.id.substring(0, 8)}</span>
+                        <span className="text-[9px] font-mono text-text-muted">{peer.presence}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -471,18 +490,18 @@ export default function RoomPage({ params }: PageProps) {
                 ))}
 
                 {activePeerList.length === 0 && (
-                  <div className="p-4 bg-bg-secondary/20 border border-dashed border-border-glass rounded-xl text-center">
+                  <div className="p-4 bg-bg-secondary/10 border border-dashed border-border-glass rounded-xl text-center">
                     <p className="text-xs text-text-muted">Waiting for peers to join...</p>
-                    <div className="mt-2 flex items-center justify-center gap-4">
+                    <div className="mt-3 flex items-center justify-center gap-4">
                       <button 
                         onClick={handleCopyLink}
-                        className="text-xs font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-xs font-mono font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
                       >
-                        Invite Peer <ChevronRight className="w-3 h-3" />
+                        Invite <ChevronRight className="w-3 h-3" />
                       </button>
                       <button 
                         onClick={() => setIsQRModalOpen(true)}
-                        className="text-xs font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-xs font-mono font-bold text-accent-primary hover:underline flex items-center gap-1 cursor-pointer"
                       >
                         Show QR <QrCode className="w-3.5 h-3.5" />
                       </button>
@@ -492,287 +511,287 @@ export default function RoomPage({ params }: PageProps) {
               </div>
             </div>
 
-            {/* Layout Toggles */}
-            <div className="space-y-2 pt-4 border-t border-border-subtle">
-              <button 
-                onClick={() => setActiveTab('transfers')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${activeTab === 'transfers' ? 'bg-bg-tertiary text-white shadow-glow' : 'hover:bg-bg-secondary/50 text-text-secondary'}`}
-              >
-                <Activity className="w-4 h-4" />
-                Transfers Queue ({activeTransfers.size})
-              </button>
-              <button 
-                onClick={() => setActiveTab('chat')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${activeTab === 'chat' ? 'bg-bg-tertiary text-white shadow-glow' : 'hover:bg-bg-secondary/50 text-text-secondary'}`}
-              >
-                <Send className="w-4 h-4" />
-                E2EE Chat Lobby ({messages.length})
-              </button>
-            </div>
           </div>
 
-          <div className="p-4 border-t border-border-subtle bg-bg-secondary/20 text-center">
-            <span className="text-[10px] font-mono text-text-muted">Zero-Knowledge Sandbox v1.0.0</span>
+          <div className="p-4 border-t border-border-subtle bg-bg-secondary/10 text-center shrink-0">
+            <span className="text-[9px] font-mono text-text-muted">Zero-Knowledge Sandbox v1.0.0</span>
           </div>
         </aside>
 
         {/* ─── Main Portal Area ─── */}
-        <main className="flex-grow flex flex-col md:flex-row overflow-hidden relative">
-          
-          {/* Active transfers / Drag Drop Portal Panel */}
-          <div className="flex-grow flex flex-col p-6 overflow-y-auto space-y-6">
+        <main 
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="flex-grow flex flex-col overflow-hidden relative z-10"
+        >
+          <div className="flex-grow flex flex-col p-4 sm:p-6 overflow-hidden h-full relative">
             
-            {/* Drag and Drop Zone */}
-            <div 
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={handleFileClick}
-              className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-12 text-center cursor-pointer transition-all duration-300 group min-h-[300px] ${isDragging ? 'border-accent-primary bg-accent-primary/5' : 'border-border-glass bg-bg-secondary/20 hover:border-accent-primary/50'}`}
-            >
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-              />
-              
-              <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1 rounded-full bg-bg-secondary/60 border border-border-glass text-[10px] font-bold uppercase tracking-wider text-text-muted">
-                <Sparkles className="w-3 h-3 text-cyan-300" />
-                P2P Relay Mode
-              </div>
-
-              <div className="flex flex-col items-center gap-4">
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/20 text-accent-primary group-hover:scale-105 transition-transform duration-300">
-                  <Paperclip className="w-8 h-8" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-bold">Secure File Broadcast</h3>
-                  <p className="text-sm text-text-secondary max-w-sm leading-relaxed">
-                    Drag and drop any file here, or click to browse. Files are encrypted client-side and streamed directly to peers.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Dynamic Queue Manager */}
-            {activeTab === 'transfers' && (
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold tracking-widest text-text-muted uppercase">Active Transfers Queue</h3>
-                
-                <div className="space-y-3">
-                  {activeTransferList.map((transfer) => (
-                    <div key={transfer.id} className="p-4 bg-bg-secondary/60 border border-border-glass rounded-2xl flex flex-col gap-3 relative overflow-hidden">
-                      {/* Highlight border on completed */}
-                      {transfer.status === 'completed' && (
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent-success" />
-                      )}
-                      
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2.5 rounded-xl ${transfer.direction === 'outgoing' ? 'bg-blue-500/10 text-blue-400' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                            <FileText className="w-5 h-5" />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className="text-sm font-bold truncate max-w-xs">{transfer.fileName}</span>
-                            <span className="text-xs text-text-muted">
-                              {formatBytes(transfer.sizeBytes)} • {transfer.direction}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {/* Transfer Speed Indicator */}
-                          {transfer.status === 'transferring' && (
-                            <span className="text-xs font-mono font-bold text-accent-primary">
-                              {formatSpeed(transfer.speedBytesPerSec)}
-                            </span>
-                          )}
-
-                          {/* Control action buttons */}
-                          {transfer.status === 'transferring' && (
-                            <button 
-                              onClick={() => {
-                                const pid = Array.from(peers.keys())[0]; // Simplification for 1 peer
-                                pauseFileTransfer(pid, transfer.id);
-                              }}
-                              className="p-1.5 rounded-lg bg-bg-tertiary hover:bg-bg-secondary text-text-primary transition-all cursor-pointer"
-                              title="Pause"
-                            >
-                              <Pause className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {transfer.status === 'paused' && (
-                            <button 
-                              onClick={() => {
-                                const pid = Array.from(peers.keys())[0];
-                                resumeFileTransfer(pid, transfer.id);
-                              }}
-                              className="p-1.5 rounded-lg bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary transition-all cursor-pointer"
-                              title="Resume"
-                            >
-                              <Play className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {(transfer.status === 'transferring' || transfer.status === 'paused' || transfer.status === 'pending') && (
-                            <button 
-                              onClick={() => {
-                                const pid = Array.from(peers.keys())[0];
-                                cancelFileTransfer(pid, transfer.id);
-                              }}
-                              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-accent-danger transition-all cursor-pointer"
-                              title="Cancel"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-
-                          {transfer.status === 'completed' && (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold text-accent-success">
-                              <CheckCircle className="w-4 h-4" />
-                              Completed
-                            </span>
-                          )}
-
-                          {transfer.status === 'failed' && (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold text-accent-danger">
-                              <AlertTriangle className="w-4 h-4" />
-                              Failed
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Progress Bar & Stats */}
-                      {(transfer.status === 'transferring' || transfer.status === 'paused' || transfer.status === 'completed') && (
-                        <div className="space-y-1.5">
-                          <div className="w-full h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
-                            <motion.div 
-                              className="h-full bg-accent-primary" 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${transfer.progress}%` }}
-                              transition={{ duration: 0.1 }}
-                            />
-                          </div>
-                          
-                          {transfer.status === 'transferring' && (
-                            <div className="flex items-center justify-between text-[10px] font-medium text-text-muted">
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {formatETA(transfer.etaSec)}
-                              </span>
-                              <span>{transfer.progress.toFixed(1)}%</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
+            {/* Drag and Drop Hover Overlay */}
+            <AnimatePresence>
+              {isDragging && (
+                <motion.div
+                  className="absolute inset-4 sm:inset-6 z-40 bg-bg-primary/95 backdrop-blur-md flex flex-col items-center justify-center border-2 border-dashed border-accent-primary rounded-2xl pointer-events-none"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <div className="flex flex-col items-center gap-4 text-center p-6">
+                    <div className="w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/20 flex items-center justify-center text-accent-primary animate-pulse shadow-elegant">
+                      <Paperclip className="w-8 h-8" />
                     </div>
-                  ))}
-
-                  {activeTransferList.length === 0 && (
-                    <div className="p-8 border border-dashed border-border-glass bg-bg-secondary/10 rounded-2xl text-center text-xs text-text-muted">
-                      No active files in the transmission logs.
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-bold tracking-tight text-text-primary">Send Files Securely P2P</h3>
+                      <p className="text-xs text-text-secondary max-w-xs leading-relaxed font-sans">
+                        Drop files anywhere in this room to instantly encrypt and stream them directly to your peers.
+                      </p>
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* E2EE Chat Drawer */}
-            {activeTab === 'chat' && (
-              <div className="flex-grow flex flex-col border border-border-glass rounded-2xl bg-bg-secondary/40 min-h-[400px] overflow-hidden">
-                {/* Chat Panel Header */}
-                <div className="px-4 py-3 bg-bg-secondary/60 border-b border-border-glass flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-accent-success" />
-                    <span className="text-xs font-bold uppercase tracking-wider">Pairwise Secure Chat Room</span>
                   </div>
-                  <span className="text-[10px] font-mono text-text-muted">OTR Mode (Off-The-Record)</span>
-                </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-                {/* Messages Body */}
-                <div className="flex-grow p-4 overflow-y-auto space-y-4 max-h-[300px] sm:max-h-[400px]">
-                  {messages.map((msg) => {
-                    const isSelf = msg.peerId === peerId;
+            {/* E2EE Chat & File Lobby Drawer */}
+            <div className="flex-grow flex flex-col border border-border-glass rounded-2xl bg-bg-secondary/10 overflow-hidden shadow-elegant h-full">
+              {/* Chat Panel Header */}
+              <div className="px-4 py-3 bg-bg-secondary/40 border-b border-border-glass flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-text-muted shrink-0">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-3.5 h-3.5 text-accent-success" />
+                  <span>E2EE Chat & File Lobby</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="hidden xs:flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-accent-primary" />
+                    <span className="text-accent-primary">P2P DIRECT RELAY</span>
+                  </div>
+                  <span>OTR Mode</span>
+                </div>
+              </div>
+
+              {/* Messages Body */}
+              <div className="flex-grow p-4 overflow-y-auto space-y-4 min-h-0">
+                {messages.map((msg) => {
+                  const isSelf = msg.peerId === peerId;
+                  
+                  if (msg.type === 'file') {
+                    // Look up transfer details reactively
+                    const transfer = activeTransfers.get(msg.transferId || '');
+                    const fileName = transfer?.fileName || msg.fileName || 'Shared File';
+                    const fileSize = transfer?.sizeBytes || msg.fileSize || 0;
+                    const status = transfer?.status || 'failed';
+                    const progress = transfer?.progress || 0;
+                    const speed = transfer?.speedBytesPerSec || 0;
+                    const eta = transfer?.etaSec || 0;
+                    const direction = transfer?.direction || (isSelf ? 'outgoing' : 'incoming');
+                    const blob = transfer?.blob;
+
                     return (
                       <div 
                         key={msg.id} 
-                        className={`flex flex-col max-w-[75%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                        className={`flex flex-col w-full max-w-[85%] sm:max-w-[70%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                       >
-                        <span className="text-[10px] text-text-muted mb-1 px-1">
+                        <span className="text-[9px] font-mono text-text-muted mb-1 px-1">
                           {isSelf ? 'You' : msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isSelf ? 'bg-accent-primary text-white rounded-br-none' : 'bg-bg-tertiary border border-border-glass text-text-primary rounded-bl-none'}`}>
-                          {msg.text}
+                        
+                        <div className={`p-4 rounded-2xl text-xs leading-relaxed font-sans w-full max-w-sm border border-border-glass relative overflow-hidden shadow-elegant ${isSelf ? 'bg-bg-tertiary text-text-primary rounded-tr-none' : 'bg-bg-tertiary/60 text-text-primary rounded-tl-none'}`}>
+                          {status === 'completed' && (
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent-success" />
+                          )}
+                          
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`p-2.5 rounded-xl shrink-0 ${direction === 'outgoing' ? 'bg-bg-secondary text-accent-primary' : 'bg-bg-secondary text-accent-warning'}`}>
+                                <FileText className="w-5 h-5" />
+                              </div>
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-bold truncate pr-2" title={fileName}>{fileName}</span>
+                                <span className="text-[10px] text-text-muted font-mono">
+                                  {formatBytes(fileSize)} • {direction}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-1.5 font-mono text-[10px]">
+                              {status === 'transferring' && (
+                                <span className="font-bold text-accent-primary mr-1">
+                                  {formatSpeed(speed)}
+                                </span>
+                              )}
+
+                              {status === 'transferring' && (
+                                <button 
+                                  onClick={() => {
+                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
+                                    pauseFileTransfer(pid, msg.transferId!);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-bg-secondary hover:bg-bg-primary text-text-primary border border-border-glass transition-all cursor-pointer flex items-center justify-center"
+                                  title="Pause"
+                                >
+                                  <Pause className="w-3 h-3" />
+                                </button>
+                              )}
+
+                              {status === 'paused' && (
+                                <button 
+                                  onClick={() => {
+                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
+                                    resumeFileTransfer(pid, msg.transferId!);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary border border-accent-primary/20 transition-all cursor-pointer flex items-center justify-center"
+                                  title="Resume"
+                                >
+                                  <Play className="w-3 h-3" />
+                                </button>
+                              )}
+
+                              {(status === 'transferring' || status === 'paused' || status === 'pending') && (
+                                <button 
+                                  onClick={() => {
+                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
+                                    cancelFileTransfer(pid, msg.transferId!);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-red-500/5 hover:bg-red-500/10 text-accent-danger border border-red-500/20 transition-all cursor-pointer flex items-center justify-center"
+                                  title="Cancel"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+
+                              {status === 'completed' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-accent-success font-sans">
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  Ready
+                                </span>
+                              )}
+
+                              {status === 'failed' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-text-muted font-sans" title="WebRTC session closed or file offline">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  Offline
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {(status === 'transferring' || status === 'paused' || status === 'completed') && (
+                            <div className="mt-3 space-y-1.5">
+                              <div className="w-full h-1 bg-bg-secondary rounded-full overflow-hidden border border-border-glass">
+                                <motion.div 
+                                  className="h-full bg-accent-primary" 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${progress}%` }}
+                                  transition={{ duration: 0.1 }}
+                                />
+                              </div>
+                              
+                              {status === 'transferring' && (
+                                <div className="flex items-center justify-between text-[9px] font-mono text-text-muted">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    {formatETA(eta)}
+                                  </span>
+                                  <span>{progress.toFixed(1)}%</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Save completed download file option */}
+                          {status === 'completed' && direction === 'incoming' && blob && (
+                            <div className="mt-3 pt-2.5 border-t border-border-glass">
+                              <button
+                                onClick={() => {
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = fileName;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                                className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-text-primary hover:bg-accent-primary text-bg-primary hover:text-bg-primary rounded-xl text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer shadow-elegant"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                Save to device
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
-                  })}
-                  <div ref={chatEndRef} />
+                  }
 
-                  {messages.length === 0 && (
-                    <div className="h-full flex items-center justify-center flex-col text-center p-8">
-                      <div className="w-12 h-12 rounded-xl bg-bg-tertiary flex items-center justify-center border border-border-glass text-text-muted mb-3">
-                        <Send className="w-5 h-5" />
+                  return (
+                    <div 
+                      key={msg.id} 
+                      className={`flex flex-col max-w-[80%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                    >
+                      <span className="text-[9px] font-mono text-text-muted mb-1 px-1">
+                        {isSelf ? 'You' : msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <div className={`px-4 py-2.5 rounded-2xl text-xs leading-relaxed font-sans ${isSelf ? 'bg-text-primary text-bg-primary rounded-tr-none font-medium' : 'bg-bg-tertiary/60 border border-border-glass text-text-primary rounded-tl-none'}`}>
+                        {msg.text}
                       </div>
-                      <h4 className="text-sm font-bold text-text-primary">E2EE Instant Messaging</h4>
-                      <p className="text-xs text-text-secondary max-w-xs mt-1 leading-relaxed">
-                        Messages are encrypted locally and dispatched directly over direct connection tunnels. No logs preserved on remote clouds.
-                      </p>
                     </div>
-                  )}
-                </div>
+                  );
+                })}
+                <div ref={chatEndRef} />
 
-                {/* Chat Panel Input Form */}
-                <form onSubmit={handleSendChat} className="p-3 bg-bg-secondary/60 border-t border-border-glass flex items-center gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Type encrypted message..."
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    className="flex-grow bg-bg-secondary border border-border-glass rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary"
-                  />
-                  <button 
-                    type="submit" 
-                    disabled={!inputText.trim()}
-                    className="p-2.5 bg-accent-primary hover:bg-accent-primary/95 text-white rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </form>
+                {messages.length === 0 && (
+                  <div className="h-full flex items-center justify-center flex-col text-center p-8">
+                    <div className="w-12 h-12 rounded-xl bg-bg-tertiary flex items-center justify-center border border-border-glass text-text-muted mb-3 shadow-elegant">
+                      <Send className="w-4 h-4 text-text-muted" />
+                    </div>
+                    <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider">Secure OTR Lobby</h4>
+                    <p className="text-[11px] text-text-secondary max-w-xs mt-2 leading-relaxed font-sans">
+                      Messages and files are encrypted client-side and dispatched directly over direct connection tunnels. No logs preserved on remote clouds.
+                      <br />
+                      <span className="text-[10px] text-accent-primary mt-3 block font-mono">
+                        Drag-and-drop files here or click the attachment button below to stream them!
+                      </span>
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* Chat Panel Input Form */}
+              <form onSubmit={handleSendChat} className="p-3 bg-bg-secondary/30 border-t border-border-glass flex items-center gap-2 shrink-0">
+                {/* Hidden File Input & Attach Button */}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  className="hidden" 
+                />
+                <button 
+                  type="button" 
+                  onClick={handleFileClick}
+                  className="p-2.5 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass text-accent-primary hover:text-accent-primary/80 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-elegant"
+                  title="Attach File"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+
+                <input 
+                  type="text" 
+                  placeholder="Type encrypted message..."
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className="flex-grow bg-bg-secondary/40 border border-border-glass rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary"
+                />
+                <button 
+                  type="submit" 
+                  disabled={!inputText.trim()}
+                  className="p-2.5 bg-text-primary hover:bg-accent-primary text-bg-primary hover:text-bg-primary rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-elegant shrink-0 animate-fade-in"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            </div>
           </div>
         </main>
       </div>
 
-      {/* ─── Global System Toast Notifications ─── */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
-        <AnimatePresence>
-          {notifications.map((n) => (
-            <motion.div 
-              key={n.id}
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              className="p-4 sc-glass-card rounded-2xl flex gap-3 pointer-events-auto cursor-pointer"
-              onClick={() => dismissToast(n.id)}
-            >
-              {n.type === 'success' && <CheckCircle className="w-5 h-5 text-accent-success shrink-0" />}
-              {n.type === 'error' && <AlertTriangle className="w-5 h-5 text-accent-danger shrink-0" />}
-              {n.type === 'warning' && <AlertTriangle className="w-5 h-5 text-accent-warning shrink-0" />}
-              {n.type === 'info' && <Shield className="w-5 h-5 text-accent-primary shrink-0" />}
-              
-              <div className="flex flex-col gap-1">
-                <span className="text-xs font-bold text-text-primary leading-none">{n.title}</span>
-                <span className="text-[11px] text-text-secondary leading-relaxed">{n.message}</span>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
       {/* ─── Ephemeral Room Invite QR Code Modal ─── */}
       <QRCodeModal 
         isOpen={isQRModalOpen}

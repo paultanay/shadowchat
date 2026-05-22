@@ -11,14 +11,12 @@ export interface ToastNotification {
 interface UIState {
   theme: 'dark' | 'light' | 'system';
   sidebarOpen: boolean;
-  activeTab: 'transfers' | 'chat' | 'peers' | 'settings';
   notifications: ToastNotification[];
   
   // Actions
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
-  setActiveTab: (tab: 'transfers' | 'chat' | 'peers' | 'settings') => void;
   showToast: (notification: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
 }
@@ -26,13 +24,11 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   theme: 'dark',
   sidebarOpen: true,
-  activeTab: 'transfers',
   notifications: [],
 
   setTheme: (theme) => set({ theme }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
-  setActiveTab: (activeTab) => set({ activeTab }),
   
   showToast: (notif) => {
     const id = window.crypto.randomUUID();

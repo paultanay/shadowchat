@@ -11,6 +11,7 @@ O = ShadowChat
 CN = shadowchat.local
 
 [v3_req]
+basicConstraints = critical, CA:TRUE
 keyUsage = digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
