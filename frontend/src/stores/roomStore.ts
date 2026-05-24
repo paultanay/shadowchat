@@ -691,24 +691,49 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 return { peers: updatedPeers };
               });
 
-              const cachedMessages = await getRoomMessages(roomId);
-              const decryptedMessages: ChatMessage[] = [];
-              for (const msg of cachedMessages) {
-                try {
-                  if (!msg.iv) continue;
-                  const text = await decryptText(derivedRoomKey, msg.encryptedText, msg.iv);
-                  decryptedMessages.push({
-                    id: String(msg.id),
-                    peerId: msg.peerId,
-                    senderName: msg.peerId === peerId ? 'You' : msg.peerId.substring(0, 8),
-                    text,
-                    timestamp: msg.timestamp
+              // Load persisted history only once (messages array is empty)
+              if (get().messages.length === 0) {
+                const cachedMessages = await getRoomMessages(roomId);
+                const decryptedMessages: ChatMessage[] = [];
+                for (const msg of cachedMessages) {
+                  try {
+                    if (msg.iv) {
+                      // Encrypted text message
+                      const text = await decryptText(derivedRoomKey, msg.encryptedText, msg.iv);
+                      decryptedMessages.push({
+                        id: String(msg.id),
+                        peerId: msg.peerId,
+                        senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
+                        text,
+                        timestamp: msg.timestamp,
+                      });
+                    } else {
+                      // File notification message (metadata stored as JSON)
+                      const meta = JSON.parse(msg.encryptedText);
+                      decryptedMessages.push({
+                        id: String(msg.id),
+                        peerId: msg.peerId,
+                        senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
+                        type: 'file',
+                        fileName: meta.name,
+                        fileSize: meta.size,
+                        fileType: meta.type,
+                        timestamp: msg.timestamp,
+                      });
+                    }
+                  } catch (err) {
+                    // skip undecryptable or malformed messages
+                    console.warn('Skipping unrecoverable message from IndexedDB:', err);
+                  }
+                }
+                if (decryptedMessages.length > 0) {
+                  set((s) => {
+                    const oldIds = new Set(decryptedMessages.map(m => m.id));
+                    const liveMessages = s.messages.filter(m => !oldIds.has(m.id));
+                    return { messages: [...decryptedMessages, ...liveMessages] };
                   });
-                } catch (err) {
-                  // skip undecryptable messages
                 }
               }
-              set({ messages: decryptedMessages });
 
             } catch (err) {
               console.error("Complete key exchange failure:", err);
