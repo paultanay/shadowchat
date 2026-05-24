@@ -16,6 +16,10 @@ desktop.ini
 *.sw?
 go.work
 
+# ─── Git Worktrees ───
+.worktrees/
+worktrees/
+
 # ─── Go Backend ───
 backend/server.exe
 backend/server
