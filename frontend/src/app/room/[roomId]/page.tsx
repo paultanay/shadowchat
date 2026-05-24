@@ -10,7 +10,8 @@ import {
   Lock, 
   Unlock, 
   Send, 
-  Paperclip, 
+  Paperclip,
+  Mic,
   Download, 
   Play, 
   Pause, 
@@ -29,6 +30,8 @@ import {
 } from "lucide-react";
 import { bytesToBase64 } from "@/lib/engines/crypto";
 import QRCodeModal from "@/components/QRCodeModal";
+import VoiceRecorder from "@/components/VoiceRecorder";
+import VoiceNote from "@/components/VoiceNote";
 
 interface PageProps {
   params: Promise<{ roomId: string }>;
@@ -669,6 +672,24 @@ export default function RoomPage({ params }: PageProps) {
                     const eta = transfer?.etaSec || 0;
                     const direction = transfer?.direction || (isSelf ? 'outgoing' : 'incoming');
                     const blob = transfer?.blob;
+                    const fileType = transfer?.fileType || msg.fileType || '';
+
+                    // Voice notes render with waveform player
+                    if (status === 'completed' && blob && fileType.startsWith('audio/')) {
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col w-full max-w-[85%] sm:max-w-[70%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                        >
+                          <span className="text-[9px] font-mono text-text-muted mb-1 px-1">
+                            {isSelf ? 'You' : msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <div className={`p-3 rounded-2xl text-xs leading-relaxed font-sans w-full border border-border-glass shadow-elegant ${isSelf ? 'bg-bg-tertiary text-text-primary rounded-tr-none' : 'bg-bg-tertiary/60 text-text-primary rounded-tl-none'}`}>
+                            <VoiceNote blob={blob} isSelf={isSelf} />
+                          </div>
+                        </div>
+                      );
+                    }
 
                     return (
                       <div 
@@ -873,6 +894,7 @@ export default function RoomPage({ params }: PageProps) {
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                   </svg>
                 </button>
+                <VoiceRecorder onSendFile={handleFileSelect} />
 
                 <input 
                   type="text" 
