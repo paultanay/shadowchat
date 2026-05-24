@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Mic, X, Square, Lock } from "lucide-react";
 import { VoiceRecorder as RecorderEngine } from "@/lib/engines/voice";
+import { useUIStore } from "@/stores/uiStore";
 
 interface VoiceRecorderProps {
   onSendFile: (file: File) => Promise<void>;
@@ -59,7 +60,11 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
       isRecordingActive.current = false;
       recorderRef.current = null;
       if (err.name === 'NotAllowedError') {
-        alert('Microphone access denied. Please allow microphone access in your browser settings.');
+        useUIStore.getState().showToast({
+          type: 'error',
+          title: 'Microphone Access Denied',
+          message: 'Please allow microphone access in your browser settings.',
+        });
       } else {
         console.error('Failed to start recording:', err);
       }
