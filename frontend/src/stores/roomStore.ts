@@ -594,7 +594,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
                           return { activeTransfers: updatedTransfers };
                         });
                       },
-                      onIncomingTransfer: (trans) => {
+                      onIncomingTransfer: async (trans) => {
                         set((s) => {
                           const updatedTransfers = new Map(s.activeTransfers);
                           updatedTransfers.set(trans.transferId, {
@@ -629,6 +629,25 @@ export const useRoomStore = create<RoomState>((set, get) => {
                           title: 'Incoming File',
                           message: `Receiving "${trans.fileName}" (${(trans.sizeBytes / 1024 / 1024).toFixed(1)} MB)...`,
                         });
+
+                        const roomId = get().roomId;
+                        if (roomId) {
+                          try {
+                            await saveMessage({
+                              roomId,
+                              peerId: from,
+                              encryptedText: JSON.stringify({
+                                type: trans.fileType,
+                                name: trans.fileName,
+                                size: trans.sizeBytes,
+                              }),
+                              iv: '',
+                              timestamp: Date.now(),
+                            });
+                          } catch (err) {
+                            console.warn('Failed to persist incoming file message:', err);
+                          }
+                        }
                       },
                       onComplete: async (tid, blob, name) => {
                         set((s) => {
