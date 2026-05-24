@@ -273,6 +273,56 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 }));
               }
 
+              // Handle history bundle
+              if (msg.type === 'history-bundle' && Array.isArray(msg.messages)) {
+                const existingIds = new Set(get().messages.map(m => m.id));
+                const newMessages: ChatMessage[] = [];
+                for (const hMsg of msg.messages) {
+                  if (!existingIds.has(hMsg.id)) {
+                    newMessages.push({
+                      ...hMsg,
+                      senderName: hMsg.peerId === get().peerId ? 'You' : hMsg.peerId.substring(0, 8),
+                    });
+                    existingIds.add(hMsg.id);
+                    try {
+                      if (hMsg.type === 'file') {
+                        await saveMessage({
+                          roomId,
+                          peerId: hMsg.peerId,
+                          encryptedText: JSON.stringify({
+                            type: hMsg.fileType,
+                            name: hMsg.fileName,
+                            size: hMsg.fileSize,
+                          }),
+                          iv: '',
+                          timestamp: hMsg.timestamp,
+                        });
+                      } else if (peerObj?.roomKey) {
+                        const enc = await encryptText(peerObj.roomKey, hMsg.text || '');
+                        await saveMessage({
+                          roomId,
+                          peerId: hMsg.peerId,
+                          encryptedText: enc.ciphertext,
+                          iv: enc.iv,
+                          timestamp: hMsg.timestamp,
+                        });
+                      }
+                    } catch (err) {
+                      console.warn('Failed to persist history message:', err);
+                    }
+                  }
+                }
+                if (newMessages.length > 0) {
+                  set((s) => {
+                    const currentIds = new Set(s.messages.map(m => m.id));
+                    const trulyNew = newMessages.filter(m => !currentIds.has(m.id));
+                    if (trulyNew.length === 0) return s;
+                    return { messages: [...s.messages, ...trulyNew] };
+                  });
+                }
+                return;
+              }
+
               // Forward transfer control messages to coordinator
               if (coordinator) {
                 coordinator.handleChannelMessage(label, data);
