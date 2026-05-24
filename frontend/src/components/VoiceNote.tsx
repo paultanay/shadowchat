@@ -27,6 +27,7 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
     });
     audioRef.current = audio;
     return () => {
+      cancelAnimationFrame(animationRef.current);
       audio.pause();
       URL.revokeObjectURL(audio.src);
     };
