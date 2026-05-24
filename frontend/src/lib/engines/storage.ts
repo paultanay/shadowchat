@@ -93,7 +93,7 @@ export async function getFileMeta(id: string): Promise<StoredFileMeta | undefine
 }
 
 export async function getRoomFiles(roomId: string): Promise<StoredFileMeta[]> {
-  return await db.files.where('roomId').equals(roomId).reverse().sortBy('addedAt');
+  return await db.files.where('roomId').equals(roomId).sortBy('addedAt').then(r => r.reverse());
 }
 
 export async function saveMessage(msg: StoredMessage): Promise<number> {

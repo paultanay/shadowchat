@@ -12,6 +12,7 @@ interface UIState {
   theme: 'dark' | 'light' | 'system';
   sidebarOpen: boolean;
   notifications: ToastNotification[];
+  pageLeaving: boolean;
   
   // Actions
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
@@ -19,12 +20,14 @@ interface UIState {
   setSidebarOpen: (open: boolean) => void;
   showToast: (notification: Omit<ToastNotification, 'id'>) => void;
   dismissToast: (id: string) => void;
+  setPageLeaving: (leaving: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
   theme: 'dark',
   sidebarOpen: true,
   notifications: [],
+  pageLeaving: false,
 
   setTheme: (theme) => set({ theme }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -50,4 +53,5 @@ export const useUIStore = create<UIState>((set) => ({
   dismissToast: (id) => set((state) => ({
     notifications: state.notifications.filter((n) => n.id !== id),
   })),
+  setPageLeaving: (leaving) => set({ pageLeaving: leaving }),
 }));

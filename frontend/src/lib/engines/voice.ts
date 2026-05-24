@@ -117,7 +117,13 @@ export class VoiceRecorder {
 
 export function computeWaveform(blob: Blob, bars: number = 40): Promise<number[]> {
   return new Promise((resolve, reject) => {
-    const audioCtx = new AudioContext();
+    let audioCtx: AudioContext;
+    try {
+      audioCtx = new AudioContext();
+    } catch (err) {
+      reject(err);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async () => {
       try {
@@ -144,7 +150,10 @@ export function computeWaveform(blob: Blob, bars: number = 40): Promise<number[]
         reject(err);
       }
     };
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => {
+      audioCtx.close();
+      reject(reader.error);
+    };
     reader.readAsArrayBuffer(blob);
   });
 }

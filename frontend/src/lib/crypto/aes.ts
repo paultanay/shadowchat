@@ -18,7 +18,7 @@ export async function encryptAESGCM(
   
   const algorithm: AesGcmParams = {
     name: 'AES-GCM',
-    iv: nonce as any,
+    iv: nonce as Uint8Array<ArrayBuffer>,
     tagLength: 128, // 16-byte authentication tag
   };
 
@@ -43,7 +43,7 @@ export async function decryptAESGCM(
 ): Promise<ArrayBuffer> {
   const algorithm: AesGcmParams = {
     name: 'AES-GCM',
-    iv: iv as any,
+    iv: iv as Uint8Array<ArrayBuffer>,
     tagLength: 128,
   };
 

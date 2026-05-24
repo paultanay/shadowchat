@@ -106,15 +106,6 @@ body::before {
   box-shadow: 0 0 50px rgba(247, 185, 67, 0.15), 0 20px 50px -15px rgba(0, 0, 0, 0.6);
 }
 
-/* Premium Gradient Text helper */
-.sc-heading-hero {
-  background: var(--sc-accent-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
 /* Glow Button */
 .sc-btn-glow {
   background: #F5F2EB;
@@ -155,4 +146,28 @@ body::before {
 }
 .spin-slow {
   animation: spin-slow 35s linear infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
 }

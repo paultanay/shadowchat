@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle, AlertTriangle, Shield, Info, X } from "lucide-react";
+import { CheckCircle, AlertTriangle, Shield, X } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 
 const iconMap = {

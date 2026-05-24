@@ -33,7 +33,7 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
   }, [isOpen, url]);
 
   const handleCopyUrl = () => {
-    navigator.clipboard.writeText(url);
+    navigator.clipboard.writeText(url).catch(() => {});
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
@@ -46,6 +46,7 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
         >
           {/* Backdrop */}
           <motion.div

@@ -11,7 +11,6 @@ import {
   Unlock, 
   Send, 
   Paperclip,
-  Mic,
   Download, 
   Play, 
   Pause, 
@@ -28,8 +27,9 @@ import {
   Sparkles,
   QrCode
 } from "lucide-react";
-import { bytesToBase64 } from "@/lib/engines/crypto";
+
 import QRCodeModal from "@/components/QRCodeModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import VoiceRecorder from "@/components/VoiceRecorder";
 import VoiceNote from "@/components/VoiceNote";
 
@@ -52,6 +52,7 @@ export default function RoomPage({ params }: PageProps) {
     peers,
     messages,
     activeTransfers,
+    pendingTransfers,
     connectSignaling,
     disconnectRoom,
     joinRoom,
@@ -63,6 +64,8 @@ export default function RoomPage({ params }: PageProps) {
     pauseFileTransfer,
     resumeFileTransfer,
     cancelFileTransfer,
+    acceptPendingTransfer,
+    rejectPendingTransfer,
   } = useRoomStore();
 
   const {
@@ -77,19 +80,12 @@ export default function RoomPage({ params }: PageProps) {
   const [isCopied, setIsCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
+  const [pendingTransfer, setPendingTransfer] = useState<{ transferId: string; fileName: string; sizeBytes: number; fileType: string } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-
-  // Warn before leaving/reloading the room
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, []);
 
   // Initialize and connect to signaling
   useEffect(() => {
@@ -151,12 +147,12 @@ export default function RoomPage({ params }: PageProps) {
           } else {
             throw new Error("Failed to retrieve join tokens from server");
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (cancelled) return;
           showToast({
             type: "error",
             title: "Access Denied",
-            message: err.message || "Failed to join room. Room may be locked, expired, or full.",
+            message: err instanceof Error ? err.message : "Failed to join room. Room may be locked, expired, or full.",
           });
           setTimeout(() => {
             if (!cancelled) window.location.href = "/";
@@ -173,6 +169,14 @@ export default function RoomPage({ params }: PageProps) {
     };
   }, [roomId]);
 
+  // React to pending transfer requests
+  useEffect(() => {
+    if (pendingTransfers.length > 0) {
+      const latest = pendingTransfers[pendingTransfers.length - 1];
+      setPendingTransfer(latest);
+    }
+  }, [pendingTransfers]);
+
   // Scroll to bottom of chat when new message arrives
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -180,7 +184,9 @@ export default function RoomPage({ params }: PageProps) {
 
   const handleCopyLink = () => {
     const link = `${window.location.origin}/room/${roomCode || roomId}${window.location.hash || ""}`;
-    navigator.clipboard.writeText(link);
+    navigator.clipboard.writeText(link).catch(() => {
+      // Fallback: could use a hidden textarea approach
+    });
     setIsCopied(true);
     showToast({
       type: "success",
@@ -212,17 +218,16 @@ export default function RoomPage({ params }: PageProps) {
     
     const items = e.dataTransfer.items;
     if (items && items.length > 0) {
-      const filePromises: Promise<File>[] = [];
+      const allFiles: File[] = [];
       for (let i = 0; i < items.length; i++) {
         const entry = items[i].webkitGetAsEntry();
         if (entry) {
           const files = await traverseDirectory(entry);
           for (const f of files) {
-            filePromises.push(Promise.resolve(f));
+            allFiles.push(f);
           }
         }
       }
-      const allFiles = await Promise.all(filePromises);
       if (allFiles.length > 10) {
         showToast({
           type: "info",
@@ -256,10 +261,15 @@ export default function RoomPage({ params }: PageProps) {
     } else if (entry.isDirectory) {
       const dirEntry = entry as FileSystemDirectoryEntry;
       const reader = dirEntry.createReader();
-      const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
-        reader.readEntries(resolve, reject);
-      });
-      for (const child of entries) {
+      const allEntries: FileSystemEntry[] = [];
+      let batch: FileSystemEntry[];
+      do {
+        batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+          reader.readEntries(resolve, reject);
+        });
+        allEntries.push(...batch);
+      } while (batch.length > 0);
+      for (const child of allEntries) {
         await traverseDirectory(child, files);
       }
     }
@@ -318,11 +328,11 @@ export default function RoomPage({ params }: PageProps) {
             message: `Encrypting keys & indexing file metadata...`,
           });
           await initiateFileTransfer(peer.id, file);
-        } catch (err: any) {
+        } catch (err: unknown) {
           showToast({
             type: "error",
             title: "Transfer Failed",
-            message: err.message || "Failed to initiate file transfer.",
+            message: err instanceof Error ? err.message : "Failed to initiate file transfer.",
           });
         }
       }
@@ -452,10 +462,7 @@ export default function RoomPage({ params }: PageProps) {
           </div>
 
           <button 
-            onClick={() => {
-              disconnectRoom();
-              window.location.href = "/";
-            }}
+            onClick={() => setShowLeaveConfirm(true)}
             className="p-2 rounded-lg bg-bg-tertiary border border-border-glass text-accent-danger hover:bg-red-500/10 hover:border-red-500/30 transition-all cursor-pointer"
             title="Leave Room"
           >
@@ -521,7 +528,7 @@ export default function RoomPage({ params }: PageProps) {
                     </button>
                   )}
                   <button 
-                    onClick={destroyRoom}
+                    onClick={() => setShowDestroyConfirm(true)}
                     className="flex items-center justify-center gap-1.5 py-2 px-3 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-lg text-accent-danger transition-all cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -671,7 +678,7 @@ export default function RoomPage({ params }: PageProps) {
                     const speed = transfer?.speedBytesPerSec || 0;
                     const eta = transfer?.etaSec || 0;
                     const direction = transfer?.direction || (isSelf ? 'outgoing' : 'incoming');
-                    const blob = transfer?.blob;
+                    const blob = transfer ? useRoomStore.getState().getTransferBlob(msg.transferId || '') : undefined;
                     const fileType = transfer?.fileType || msg.fileType || '';
 
                     // Voice notes render with waveform player
@@ -922,6 +929,52 @@ export default function RoomPage({ params }: PageProps) {
         onClose={() => setIsQRModalOpen(false)}
         url={getInviteUrl()}
         roomCode={roomCode || undefined}
+      />
+
+      <ConfirmDialog
+        isOpen={showLeaveConfirm}
+        onConfirm={() => {
+          setShowLeaveConfirm(false);
+          disconnectRoom();
+          window.location.href = "/";
+        }}
+        onCancel={() => setShowLeaveConfirm(false)}
+        title="Leave Room"
+        message="This will disconnect you from the secure room and all active peer connections. You'll need a fresh invite to rejoin."
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="danger"
+      />
+
+      <ConfirmDialog
+        isOpen={showDestroyConfirm}
+        onConfirm={() => {
+          setShowDestroyConfirm(false);
+          destroyRoom();
+        }}
+        onCancel={() => setShowDestroyConfirm(false)}
+        title="Destroy Room"
+        message="This will permanently destroy the room and disconnect all members. This action cannot be undone."
+        confirmLabel="Destroy"
+        cancelLabel="Cancel"
+        variant="danger"
+      />
+
+      <ConfirmDialog
+        isOpen={pendingTransfer !== null}
+        onConfirm={() => {
+          if (pendingTransfer) acceptPendingTransfer(pendingTransfer.transferId);
+          setPendingTransfer(null);
+        }}
+        onCancel={() => {
+          if (pendingTransfer) rejectPendingTransfer(pendingTransfer.transferId);
+          setPendingTransfer(null);
+        }}
+        title="Incoming File Transfer"
+        message={pendingTransfer ? `${pendingTransfer.fileName} (${(pendingTransfer.sizeBytes / 1024).toFixed(1)} KB) wants to send you a file. Accept?` : ''}
+        confirmLabel="Accept"
+        cancelLabel="Reject"
+        variant="default"
       />
     </div>
   );

@@ -9,9 +9,7 @@ import {
   wrapFileKey, 
   unwrapFileKey, 
   encryptText, 
-  decryptText,
-  base64ToBytes,
-  bytesToBase64
+  decryptText
 } from './crypto';
 import { encryptAESGCM, decryptAESGCM } from '../crypto/aes';
 import { calculateFileHash } from '../crypto/integrity';
@@ -39,6 +37,7 @@ export interface TransferProgress {
 export interface FileTransferEvents {
   onProgress?: (progress: TransferProgress) => void;
   onIncomingTransfer?: (transfer: { transferId: string; fileName: string; sizeBytes: number; fileType: string }) => void;
+  onIncomingTransferRequest?: (transfer: { transferId: string; fileName: string; sizeBytes: number; fileType: string }) => void;
   onComplete?: (transferId: string, blob: Blob, fileName: string) => void;
   onFailed?: (transferId: string, error: string) => void;
 }
@@ -284,8 +283,13 @@ export class FileTransferCoordinator {
             });
           }
 
-          // Automatically accept for zero friction, or stores can trigger accept
-          this.acceptTransfer(transferId);
+          if (this.events.onIncomingTransferRequest) {
+            // UI will decide whether to accept
+            this.events.onIncomingTransferRequest({ transferId, fileName, sizeBytes: msg.sizeBytes, fileType });
+          } else {
+            // No UI handler — auto-accept for backwards compatibility
+            this.acceptTransfer(transferId);
+          }
           break;
         }
 
@@ -333,7 +337,7 @@ export class FileTransferCoordinator {
     }
   }
 
-  private acceptTransfer(transferId: string): void {
+  public acceptTransfer(transferId: string): void {
     const incoming = this.activeIncoming.get(transferId);
     if (incoming) {
       this.sendControl({ type: 'accept', transferId });
@@ -495,14 +499,15 @@ export class FileTransferCoordinator {
           etaSec: 0,
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.activeOutgoing.delete(transferId);
       if (meta) {
         meta.status = 'failed';
         await saveFileMeta(meta);
       }
       if (this.events.onFailed) {
-        this.events.onFailed(transferId, err.message || 'Transmission failed');
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        this.events.onFailed(transferId, errorMsg);
       }
     }
   }
@@ -558,7 +563,7 @@ export class FileTransferCoordinator {
         this.activeIncoming.delete(transferId);
         await this.reassembleFile(transferId, incoming);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.activeIncoming.delete(transferId);
       await clearTransferChunks(transferId);
       const meta = await getFileMeta(transferId);
@@ -567,7 +572,8 @@ export class FileTransferCoordinator {
         await saveFileMeta(meta);
       }
       if (this.events.onFailed) {
-        this.events.onFailed(transferId, err.message || 'Chunk store error');
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        this.events.onFailed(transferId, errorMsg);
       }
     }
   }
@@ -592,36 +598,7 @@ export class FileTransferCoordinator {
 
       // Decrypt chunks one by one
       const decryptedBuffers: ArrayBuffer[] = [];
-      
-      // We retrieve original ivs from the binary wire format. But wait, in handleDataMessage,
-      // we only saved the ciphertext (ciphertext = data).
-      // Oh! Did we save the IV?
-      // Ah! In saveChunk, we did:
-      // data: ciphertext.
-      // Wait, to decrypt, we need the IV!
-      // Oh! We should modify saveChunk to store both ciphertext and IV, or store them together.
-      // Yes! In the binary wire format, we have the IV. If we store the IV along with the ciphertext
-      // inside `StoredChunk`, or prepend it to the data field, it will be trivial to retrieve!
-      // Let's check `storage.ts`. `StoredChunk` only has:
-      // `data: ArrayBuffer`.
-      // If we prepend the 12-byte IV to the ciphertext and save it to IndexedDB as `data`, we can easily
-      // split it on reassembly: the first 12 bytes will be the IV, and the rest is ciphertext!
-      // That is extremely clever and doesn't require modifying the database schema!
-      // Let's do that! Let's update `handleDataMessage` to prepend the IV:
-      // ```typescript
-      // const chunkBuffer = new Uint8Array(12 + ciphertext.byteLength);
-      // chunkBuffer.set(iv, 0);
-      // chunkBuffer.set(new Uint8Array(ciphertext), 12);
-      // await saveChunk({ transferId, chunkIndex, data: chunkBuffer.buffer });
-      // ```
-      // Then on decryption:
-      // ```typescript
-      // const chunkData = new Uint8Array(chunk.data);
-      // const iv = chunkData.subarray(0, 12);
-      // const ciphertext = chunkData.subarray(12);
-      // ```
-      // This is absolutely brilliant and elegant! Let's write the code exactly like this.
-      
+
       for (const chunk of chunks) {
         const chunkData = new Uint8Array(chunk.data);
         const iv = chunkData.subarray(0, 12);
@@ -650,14 +627,15 @@ export class FileTransferCoordinator {
       if (this.events.onComplete) {
         this.events.onComplete(transferId, blob, incoming.meta.fileName);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       await clearTransferChunks(transferId);
       if (meta) {
         meta.status = 'failed';
         await saveFileMeta(meta);
       }
       if (this.events.onFailed) {
-        this.events.onFailed(transferId, err.message || 'File reassembly error');
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        this.events.onFailed(transferId, errorMsg);
       }
     }
   }

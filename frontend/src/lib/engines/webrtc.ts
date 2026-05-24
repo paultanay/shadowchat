@@ -62,6 +62,10 @@ export class PeerConnectionManager {
       if (!this.pc) return;
       const state = this.pc.connectionState as ConnectionState;
       this.events.onStateChange(state);
+      if (state === 'failed') {
+        console.warn('[PeerConnectionManager] Connection failed, restarting ICE...');
+        this.pc.restartIce();
+      }
     };
 
     if (this.isInitiator) {
@@ -102,14 +106,10 @@ export class PeerConnectionManager {
       return;
     }
     
-    console.log(`[PeerConnectionManager] Handling inbound SDP Offer from peer ${this.peerId}. Current signalingState: ${this.pc.signalingState}`);
     try {
       await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-      console.log(`[PeerConnectionManager] SetRemoteDescription (Offer) successful. Creating answer...`);
       const answer = await this.pc.createAnswer();
-      console.log(`[PeerConnectionManager] Created SDP Answer. Setting local description...`);
       await this.pc.setLocalDescription(answer);
-      console.log(`[PeerConnectionManager] SetLocalDescription (Answer) successful. Relaying SDP Answer via signaling...`);
 
       this.signaling.send('answer', this.roomId, this.peerId, {
         sdp: answer.sdp,
@@ -126,10 +126,8 @@ export class PeerConnectionManager {
       return;
     }
     
-    console.log(`[PeerConnectionManager] Handling inbound SDP Answer from peer ${this.peerId}. Current signalingState: ${this.pc.signalingState}`);
     try {
       await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
-      console.log(`[PeerConnectionManager] SetRemoteDescription (Answer) successful for peer: ${this.peerId}`);
     } catch (err) {
       console.error(`[PeerConnectionManager] Error during handleAnswer for peer ${this.peerId}:`, err);
       throw err;
@@ -142,10 +140,8 @@ export class PeerConnectionManager {
       return;
     }
     
-    console.log(`[PeerConnectionManager] Applying ICE Candidate from peer ${this.peerId}...`);
     try {
       await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-      console.log(`[PeerConnectionManager] Successfully applied ICE Candidate for peer ${this.peerId}`);
     } catch (err) {
       console.warn(`[PeerConnectionManager] Ignored/failed ICE candidate for peer ${this.peerId}:`, err);
     }
@@ -180,8 +176,8 @@ export class PeerConnectionManager {
       this.events.onMessage(dc.label, event.data);
     };
 
-    dc.onerror = () => {
-      // data channel transfer failed
+    dc.onerror = (err) => {
+      console.error(`[PeerConnectionManager] Data channel '${dc.label}' error:`, err);
     };
   }
 }

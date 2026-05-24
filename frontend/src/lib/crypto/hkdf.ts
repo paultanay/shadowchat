@@ -22,8 +22,8 @@ export async function deriveRoomKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: salt as any,
-      info: info as any,
+      salt: salt as Uint8Array<ArrayBuffer>,
+      info: info as Uint8Array<ArrayBuffer>,
     },
     baseKey,
     {
@@ -54,8 +54,8 @@ export async function deriveBitsHKDF(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: salt as any,
-      info: info as any,
+      salt: salt as Uint8Array<ArrayBuffer>,
+      info: info as Uint8Array<ArrayBuffer>,
     },
     baseKey,
     bitLength

@@ -19,7 +19,7 @@ FROM alpine:3.20
 WORKDIR /app
 
 # Install certificates for secure connections
-RUN apk --no-cache add ca-certificates curl
+RUN apk --no-cache add ca-certificates
 
 # Copy binary from builder
 COPY --from=builder /app/server .
@@ -28,4 +28,9 @@ COPY --from=builder /app/server .
 EXPOSE 8080
 
 # Run the signaling server
+RUN adduser -D -u 1001 appuser
+USER appuser
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD wget -qO- http://localhost:8080/api/v1/health || exit 1
+
 CMD ["./server"]

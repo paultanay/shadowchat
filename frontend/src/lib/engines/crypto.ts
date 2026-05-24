@@ -1,6 +1,4 @@
 import {
-  generateX25519KeyPair,
-  generateEd25519KeyPair,
   exportKeyToJwk,
   importX25519PublicKey,
   importEd25519PublicKey,

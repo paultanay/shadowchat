@@ -193,7 +193,10 @@ func (h *RoomHandler) GetMetadata(c *fiber.Ctx) error {
 
 func (h *RoomHandler) Lock(c *fiber.Ctx) error {
 	id := c.Params("id")
-	claims := c.Locals("room_claims").(*crypto.RoomClaims)
+	claims, ok := c.Locals("room_claims").(*crypto.RoomClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 
 	if claims.RoomID != id || claims.Role != "owner" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
@@ -214,7 +217,10 @@ func (h *RoomHandler) Lock(c *fiber.Ctx) error {
 
 func (h *RoomHandler) Unlock(c *fiber.Ctx) error {
 	id := c.Params("id")
-	claims := c.Locals("room_claims").(*crypto.RoomClaims)
+	claims, ok := c.Locals("room_claims").(*crypto.RoomClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 
 	if claims.RoomID != id || claims.Role != "owner" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
@@ -235,7 +241,10 @@ func (h *RoomHandler) Unlock(c *fiber.Ctx) error {
 
 func (h *RoomHandler) Destroy(c *fiber.Ctx) error {
 	id := c.Params("id")
-	claims := c.Locals("room_claims").(*crypto.RoomClaims)
+	claims, ok := c.Locals("room_claims").(*crypto.RoomClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 
 	if claims.RoomID != id || claims.Role != "owner" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{

@@ -22,16 +22,12 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pointerStartRef = useRef({ x: 0, y: 0 });
-  const capturedPointerRef = useRef<number | null>(null);
+  const holdActiveRef = useRef(false);
   const isRecordingActive = useRef(false);
 
   const cleanupRecording = useCallback(() => {
     clearInterval(timerRef.current);
     clearTimeout(holdTimerRef.current);
-    if (capturedPointerRef.current !== null) {
-      // release happens automatically on pointerup, but ensure it's cleared
-      capturedPointerRef.current = null;
-    }
     recorderRef.current?.cancel();
     recorderRef.current = null;
     isRecordingActive.current = false;
@@ -56,10 +52,10 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
         setElapsed((prev) => prev + 1);
       }, 1000);
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       isRecordingActive.current = false;
       recorderRef.current = null;
-      if (err.name === 'NotAllowedError') {
+      if (err instanceof Error && err.name === 'NotAllowedError') {
         useUIStore.getState().showToast({
           type: 'error',
           title: 'Microphone Access Denied',
@@ -85,8 +81,8 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
         type: blob.type || 'audio/webm',
       });
       await onSendFile(file);
-    } catch (err: any) {
-      if (err.message !== 'Recording too short') {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message !== 'Recording too short') {
         console.error('[VoiceRecorder] stopAndSend error:', err);
       }
     } finally {
@@ -105,12 +101,13 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     } else {
       const targetEl = e.currentTarget as HTMLElement;
       const pointerId = e.pointerId;
+      holdActiveRef.current = true;
       holdTimerRef.current = setTimeout(async () => {
+        if (!holdActiveRef.current) return;
         const ok = await startRecording();
         if (!ok) return;
         setUiState('recording-live');
         targetEl.setPointerCapture(pointerId);
-        capturedPointerRef.current = pointerId;
       }, 200);
     }
   };
@@ -127,8 +124,9 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     clearTimeout(holdTimerRef.current);
+    holdActiveRef.current = false;
 
-    if (e.pointerType === 'touch' && uiState === 'recording-live') {
+    if (e.pointerType !== 'mouse' && uiState === 'recording-live') {
       if (slideTarget === 'cancel') { cleanupRecording(); return; }
       if (slideTarget === 'lock') { setUiState('recording-bar'); setSlideTarget('none'); return; }
       stopAndSend();
@@ -145,9 +143,14 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
 
   useEffect(() => {
     if (uiState !== 'recording-bar' && uiState !== 'recording-live') return;
-    const id = requestAnimationFrame(() => setTick(performance.now()));
-    return () => cancelAnimationFrame(id);
-  }, [uiState, tick]);
+    let rafId: number;
+    const loop = () => {
+      setTick(performance.now());
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, [uiState]);
 
   const formatElapsed = (s: number) => {
     const m = Math.floor(s / 60);
@@ -200,7 +203,7 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={(e) => {
-        if (e.pointerType !== 'touch') return;
+        if (e.pointerType === 'mouse') return;
         clearTimeout(holdTimerRef.current);
         if (uiState !== 'recording-live') return;
         if (slideTarget === 'cancel') cleanupRecording();
@@ -209,6 +212,7 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
       }}
       className="p-2.5 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass text-accent-primary hover:text-accent-primary/80 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-elegant relative touch-none select-none"
       title="Record voice message"
+      aria-label="Voice message"
     >
       <Mic className="w-4 h-4" />
       {uiState === 'recording-live' && (

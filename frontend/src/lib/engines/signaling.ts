@@ -22,14 +22,16 @@ type EventCallback<T extends EventName> = SignalingEventMap[T];
 export class SignalingClient {
   private socket: WebSocket | null = null;
   private url: string;
-  private listeners: { [key in EventName]?: any[] } = {};
+  private token: string;
+  private listeners: { [key in EventName]?: ((...args: any[]) => void)[] } = {};
   private sendQueue: string[] = [];
-  private reconnectTimer: any = null;
-  private pingTimer: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+  private pingTimer: ReturnType<typeof setInterval> | undefined = undefined;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private baseDelay = 1000; // 1s
   private isDisconnecting = false;
+  private lastPongTime = Date.now();
 
   constructor(roomId: string, token: string) {
     // Determine signaling WebSocket URL (support relative and absolute configs dynamically)
@@ -51,7 +53,8 @@ export class SignalingClient {
       wsBase = process.env.NEXT_PUBLIC_WS_URL || 'wss://api.shadowchat.local/ws';
     }
     
-    this.url = `${wsBase}?room=${roomId}&token=${token}`;
+    this.token = token;
+    this.url = `${wsBase}?room=${roomId}`;
   }
 
   public connect(): void {
@@ -63,47 +66,41 @@ export class SignalingClient {
       this.socket.binaryType = 'arraybuffer';
 
       this.socket.onopen = () => {
-        this.reconnectAttempts = 0;
-        this.trigger('connect', undefined);
-        this.startHeartbeat();
-        this.flushQueue();
+        // Send auth token as first message after connection (never in URL)
+        this.socket!.send(JSON.stringify({ type: 'auth', token: this.token }));
       };
 
       this.socket.onclose = () => {
         this.stopHeartbeat();
         this.socket = null;
         this.trigger('disconnect', undefined);
+        this.scheduleReconnect();
+      };
 
-        if (!this.isDisconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
-          const delay = Math.min(15000, this.baseDelay * Math.pow(2, this.reconnectAttempts));
-          this.reconnectAttempts++;
-          this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      this.socket.onerror = (event) => {
+        console.error('[Signaling] WebSocket error', event);
+      };
+
+      this.socket.onmessage = (event) => {
+        const lines = event.data.split('\n').filter(Boolean);
+        for (const line of lines) {
+          let data: any;
+          try {
+            data = JSON.parse(line);
+          } catch (err) {
+            console.error('[Signaling] Invalid JSON line:', line, err);
+            continue;
+          }
+          try {
+            this.handleMessage(data);
+          } catch (err) {
+            console.error('[Signaling] Handler error:', data, err);
+          }
         }
       };
-
-      this.socket.onerror = () => {
-        // ws close will trigger reconnect logic
-      };
-
-this.socket.onmessage = (event) => {
-  const lines = event.data.split('\n').filter(Boolean);
-  for (const line of lines) {
-    let data: any;
-    try {
-      data = JSON.parse(line);
     } catch (err) {
-      console.error('[Signaling] Invalid JSON line:', line, err);
-      continue;
-    }
-    try {
-      this.handleMessage(data);
-    } catch (err) {
-      console.error('[Signaling] Handler error:', data, err);
-    }
-  }
-};
-    } catch (err) {
-      // socket init error
+      console.error('[Signaling] Connection failed:', err);
+      this.socket = null;
     }
   }
 
@@ -114,6 +111,22 @@ this.socket.onmessage = (event) => {
     if (this.socket) {
       this.socket.close();
       this.socket = null;
+    }
+  }
+
+  destroy() {
+    clearTimeout(this.reconnectTimer);
+    clearInterval(this.pingTimer);
+    this.listeners = {} as any;
+    this.socket?.close();
+    this.socket = null;
+  }
+
+  private scheduleReconnect() {
+    if (!this.isDisconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
+      const delay = Math.min(15000, this.baseDelay * Math.pow(2, this.reconnectAttempts));
+      this.reconnectAttempts++;
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
     }
   }
 
@@ -153,6 +166,17 @@ this.socket.onmessage = (event) => {
 
   private handleMessage(msg: any): void {
     switch (msg.type) {
+      case 'auth':
+        if (msg.success) {
+          this.reconnectAttempts = 0;
+          this.trigger('connect', undefined);
+          this.startHeartbeat();
+          this.flushQueue();
+        } else {
+          console.error('[Signaling] Auth rejected:', msg.error);
+          this.socket?.close();
+        }
+        break;
       case 'peer-joined':
         this.trigger('peer-joined', { peerId: msg.peerId, peerCount: msg.peerCount });
         break;
@@ -181,7 +205,7 @@ this.socket.onmessage = (event) => {
         this.trigger('error', { code: msg.code, message: msg.message });
         break;
       case 'pong':
-        // received ping response, keepalive validated
+        this.lastPongTime = Date.now();
         break;
     }
   }
@@ -189,6 +213,13 @@ this.socket.onmessage = (event) => {
   private startHeartbeat(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = setInterval(() => {
+      if (Date.now() - this.lastPongTime > 35000) {
+        console.warn('[Signaling] No pong received, reconnecting...');
+        this.socket?.close();
+        this.socket = null;
+        this.scheduleReconnect();
+        return;
+      }
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
         this.socket.send(JSON.stringify({ type: 'ping' }));
       }
@@ -198,7 +229,7 @@ this.socket.onmessage = (event) => {
   private stopHeartbeat(): void {
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
-      this.pingTimer = null;
+      this.pingTimer = undefined;
     }
   }
 

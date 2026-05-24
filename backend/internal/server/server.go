@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -52,22 +53,49 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		return c.Next()
 	})
 
-	// Connect to PostgreSQL
-	db, err := repository.ConnectDB(cfg.DatabaseURL, logger)
+	// Connect to PostgreSQL with retry
+	var (
+		db      *repository.DB
+		rdb     *redis.Cache
+		broker  *nats.Broker
+		err     error
+	)
+	for i := 0; i < 5; i++ {
+		db, err = repository.ConnectDB(cfg.DatabaseURL, logger)
+		if err == nil {
+			break
+		}
+		logger.Warn().Err(err).Int("attempt", i+1).Msg("PostgreSQL connection failed, retrying...")
+		time.Sleep(time.Duration(1<<i) * time.Second)
+	}
 	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to PostgreSQL database")
+		logger.Fatal().Err(err).Msg("Failed to connect to PostgreSQL after 5 attempts")
 	}
 
-	// Connect to Redis
-	rdb, err := redis.Connect(cfg.RedisURL, logger)
+	// Connect to Redis with retry
+	for i := 0; i < 5; i++ {
+		rdb, err = redis.Connect(cfg.RedisURL, logger)
+		if err == nil {
+			break
+		}
+		logger.Warn().Err(err).Int("attempt", i+1).Msg("Redis connection failed, retrying...")
+		time.Sleep(time.Duration(1<<i) * time.Second)
+	}
 	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to Redis cache")
+		logger.Fatal().Err(err).Msg("Failed to connect to Redis after 5 attempts")
 	}
 
-	// Connect to NATS
-	broker, err := nats.Connect(cfg.NatsURL, logger)
+	// Connect to NATS with retry
+	for i := 0; i < 5; i++ {
+		broker, err = nats.Connect(cfg.NatsURL, logger)
+		if err == nil {
+			break
+		}
+		logger.Warn().Err(err).Int("attempt", i+1).Msg("NATS connection failed, retrying...")
+		time.Sleep(time.Duration(1<<i) * time.Second)
+	}
 	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to NATS broker")
+		logger.Fatal().Err(err).Msg("Failed to connect to NATS after 5 attempts")
 	}
 
 	// Instantiate Repo & Service Layers
@@ -124,8 +152,8 @@ func (s *Server) setupRoutes(roomService *service.RoomService) {
 	// Ephemeral TURN credentials (restricted to active authenticated room members)
 	protected.Get("/turn/credentials", turnHandler.GetCredentials)
 
-	// WebSocket Signaling Route (with pre-handshake query-token upgrade auth middleware)
-	s.App.Get("/ws", handler.WSAuthMiddleware(s.Cfg, roomService, s.Logger), handler.WSHandler(s.Hub, s.Logger))
+	// WebSocket Signaling Route (auth happens after upgrade via first message)
+	s.App.Get("/ws", handler.WSAuthMiddleware(s.Cfg, roomService, s.Logger), handler.WSHandler(s.Hub, s.Cfg, roomService, s.Logger))
 }
 
 // Close gracefully shuts down the server services (DB, Redis, NATS, Hub context)

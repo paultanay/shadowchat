@@ -64,11 +64,11 @@ export default function Home() {
         window.location.href = `/room/${roomId}${hashPart}`;
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast({
         type: "error",
         title: "Access Denied",
-        message: err.message || "Invalid room code or room is full.",
+        message: err instanceof Error ? err.message : "Invalid room code or room is full.",
       });
       setIsJoining(false);
     }
@@ -128,11 +128,11 @@ export default function Home() {
         window.location.href = `/room/${roomId}#key=${base64Key}`;
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast({
         type: "error",
         title: "Creation Failed",
-        message: err.message || "Failed to establish secure room on signaling cluster.",
+        message: err instanceof Error ? err.message : "Failed to establish secure room on signaling cluster.",
       });
       setIsCreating(false);
     }
@@ -161,11 +161,11 @@ export default function Home() {
         window.location.href = `/room/${roomId}`;
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast({
         type: "error",
         title: "Access Denied",
-        message: err.message || "Invalid room code or room is full.",
+        message: err instanceof Error ? err.message : "Invalid room code or room is full.",
       });
       setIsJoining(false);
     }

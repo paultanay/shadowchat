@@ -78,7 +78,10 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
         animationRef.current = requestAnimationFrame(update);
       };
       update();
-      playPromise.catch(() => setPlaying(false));
+      playPromise.catch(() => {
+        cancelAnimationFrame(animationRef.current);
+        setPlaying(false);
+      });
     }
   }, [playing]);
 

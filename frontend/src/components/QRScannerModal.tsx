@@ -150,6 +150,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          onKeyDown={(e) => { if (e.key === 'Escape') handleClose(); }}
         >
           <motion.div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
@@ -202,6 +203,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                   <video
                     ref={videoRef}
                     className="absolute inset-0 w-full h-full object-cover"
+                    aria-label="QR Code Scanner Camera"
                   />
                   <canvas ref={canvasRef} className="hidden" />
 

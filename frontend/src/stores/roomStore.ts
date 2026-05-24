@@ -17,14 +17,14 @@ import {
 } from '@/lib/engines/crypto';
 import { 
   saveRoom, 
-  getRoom, 
   saveMessage, 
-  getRoomMessages, 
-  StoredMessage,
-  StoredRoom 
+  getRoomMessages 
 } from '@/lib/engines/storage';
 import { FileTransferCoordinator } from '@/lib/engines/transfer';
 import { useUIStore } from './uiStore';
+
+const transferBlobs = new WeakMap<object, Blob>();
+const transferBlobKeys = new Map<string, object>();
 
 const getApiBase = () => {
   if (typeof window !== 'undefined') {
@@ -83,6 +83,9 @@ interface RoomState {
   peers: Map<string, Peer>;
   messages: ChatMessage[];
   
+  // Pending transfers awaiting user opt-in
+  pendingTransfers: Array<{ transferId: string; fileName: string; sizeBytes: number; fileType: string }>;
+
   // Active transfer trackers
   activeTransfers: Map<string, {
     peerId: string;
@@ -94,7 +97,6 @@ interface RoomState {
     speedBytesPerSec: number;
     etaSec: number;
     status: 'pending' | 'transferring' | 'completed' | 'failed' | 'paused';
-    blob?: Blob;
   }>;
 
   // Actions
@@ -116,10 +118,15 @@ interface RoomState {
   destroyRoom: () => Promise<void>;
   
   // P2P Actions
+  getTransferBlob: (transferId: string) => Blob | undefined;
   initiateFileTransfer: (peerId: string, file: File) => Promise<string>;
   pauseFileTransfer: (peerId: string, transferId: string) => void;
   resumeFileTransfer: (peerId: string, transferId: string) => void;
   cancelFileTransfer: (peerId: string, transferId: string) => void;
+
+  // Pending transfer opt-in
+  acceptPendingTransfer: (transferId: string) => void;
+  rejectPendingTransfer: (transferId: string) => void;
 }
 
 // Guards against duplicate initialization from React Strict Mode double-mount
@@ -313,12 +320,9 @@ export const useRoomStore = create<RoomState>((set, get) => {
                   }
                 }
                 if (newMessages.length > 0) {
-                  set((s) => {
-                    const currentIds = new Set(s.messages.map(m => m.id));
-                    const trulyNew = newMessages.filter(m => !currentIds.has(m.id));
-                    if (trulyNew.length === 0) return s;
-                    return { messages: [...s.messages, ...trulyNew] };
-                  });
+                  set((s) => ({
+                    messages: [...s.messages, ...newMessages],
+                  }));
                 }
                 return;
               }
@@ -383,6 +387,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     signalingState: 'disconnected',
     peers: new Map(),
     messages: [],
+    pendingTransfers: [],
     activeTransfers: new Map(),
 
     createRoom: async (params) => {
@@ -532,11 +537,13 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
         client.on('disconnect', () => {
           set({ signalingState: 'disconnected' });
-          useUIStore.getState().showToast({
-            type: 'warning',
-            title: 'Disconnected',
-            message: 'Signaling lost. Attempting auto-reconnect...',
-          });
+          if (!useUIStore.getState().pageLeaving) {
+            useUIStore.getState().showToast({
+              type: 'warning',
+              title: 'Disconnected',
+              message: 'Signaling lost. Attempting auto-reconnect...',
+            });
+          }
         });
 
         client.on('peer-joined', ({ peerId: remotePeerId }) => {
@@ -547,7 +554,8 @@ export const useRoomStore = create<RoomState>((set, get) => {
               title: 'Peer Joined',
               message: `Establishing direct P2P tunnel with ${remotePeerId.substring(0, 8)}...`,
             });
-            const isInitiator = currentPeerId! < remotePeerId;
+            if (!currentPeerId) return;
+            const isInitiator = currentPeerId < remotePeerId;
             setupWebRTCPeer(remotePeerId, isInitiator);
           }
         });
@@ -562,18 +570,21 @@ export const useRoomStore = create<RoomState>((set, get) => {
             }
             return { peers: updatedPeers };
           });
-          useUIStore.getState().showToast({
-            type: 'info',
-            title: 'Peer Left',
-            message: `Connection with ${remotePeerId.substring(0, 8)} terminated.`,
-          });
+          if (!useUIStore.getState().pageLeaving) {
+            useUIStore.getState().showToast({
+              type: 'info',
+              title: 'Peer Left',
+              message: `Connection with ${remotePeerId.substring(0, 8)} terminated.`,
+            });
+          }
         });
 
         client.on('room-state', ({ peers: peerList }) => {
           const currentPeerId = get().peerId;
           peerList.forEach((pid) => {
             if (pid !== currentPeerId && !get().peers.has(pid)) {
-              const isInitiator = currentPeerId! < pid;
+              if (!currentPeerId) return;
+              const isInitiator = currentPeerId < pid;
               setupWebRTCPeer(pid, isInitiator);
             }
           });
@@ -644,6 +655,11 @@ export const useRoomStore = create<RoomState>((set, get) => {
                           return { activeTransfers: updatedTransfers };
                         });
                       },
+                      onIncomingTransferRequest: (trans) => {
+                        set((s) => ({
+                          pendingTransfers: [...s.pendingTransfers, trans],
+                        }));
+                      },
                       onIncomingTransfer: async (trans) => {
                         set((s) => {
                           const updatedTransfers = new Map(s.activeTransfers);
@@ -700,13 +716,16 @@ export const useRoomStore = create<RoomState>((set, get) => {
                         }
                       },
                       onComplete: async (tid, blob, name) => {
+                        const blobKey: object = {};
+                        transferBlobs.set(blobKey, blob);
+                        transferBlobKeys.set(tid, blobKey);
+
                         set((s) => {
                           const updatedTransfers = new Map(s.activeTransfers);
                           const current = updatedTransfers.get(tid);
                           if (current) {
                             current.progress = 100;
                             current.status = 'completed';
-                            current.blob = blob;
                             updatedTransfers.set(tid, current);
                           }
                           return { activeTransfers: updatedTransfers };
@@ -821,8 +840,12 @@ export const useRoomStore = create<RoomState>((set, get) => {
           });
         });
 
-        client.connect();
-        set({ signaling: client });
+        try {
+          await client.connect();
+          set({ signaling: client });
+        } catch (err) {
+          console.error('Failed to connect signaling:', err);
+        }
       })();
 
       try {
@@ -837,6 +860,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const { signaling, peers } = get();
       if (signaling) signaling.disconnect();
       peers.forEach((p) => p.pcManager?.close());
+      transferBlobKeys.clear();
       set({
         roomId: null,
         roomCode: null,
@@ -850,6 +874,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         signalingState: 'disconnected',
         peers: new Map(),
         messages: [],
+        pendingTransfers: [],
         activeTransfers: new Map(),
       });
     },
@@ -861,49 +886,45 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const timestamp = Date.now();
       const messageId = window.crypto.randomUUID();
 
-      // Prepend chat bubble locally
-      set((s) => ({
-        messages: [
-          ...s.messages,
-          {
-            id: messageId,
-            peerId: peerId,
-            senderName: 'You',
-            text,
-            timestamp,
-          }
-        ]
-      }));
-
-      // Broadcast encrypted message to each connected peer over derived room keys
-      peers.forEach(async (peer, remoteId) => {
+      // Broadcast encrypted message to each connected peer
+      let anySent = false;
+      for (const [remoteId, peer] of peers) {
         if (peer.roomKey && peer.pcManager?.controlChannel?.readyState === 'open') {
           try {
             const enc = await encryptText(peer.roomKey, text);
-            
-            // Save encrypted copy to local IndexDB cache for history
             await saveMessage({
               roomId,
               peerId,
               encryptedText: enc.ciphertext,
-              iv: enc.iv, // Persist IV for future decryption after page reload
+              iv: enc.iv,
               timestamp,
             });
-
             peer.pcManager.controlChannel.send(JSON.stringify({
               type: 'chat',
               text: enc.ciphertext,
               iv: enc.iv,
             }));
+            anySent = true;
           } catch (err) {
-            // failed encryption
+            console.error('Failed to encrypt/send message to peer', remoteId, err);
           }
         }
-      });
+      }
+
+      // Prepend chat bubble locally only after successful broadcast attempt
+      if (anySent) {
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            { id: messageId, peerId, senderName: 'You', text, timestamp }
+          ]
+        }));
+      }
     },
 
     // Room controls (Owner only)
     lockRoom: async () => {
+      if (get().roomRole !== 'owner') return;
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
@@ -923,6 +944,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
 
     unlockRoom: async () => {
+      if (get().roomRole !== 'owner') return;
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
@@ -942,6 +964,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
 
     destroyRoom: async () => {
+      if (get().roomRole !== 'owner') return;
       const { roomId, token } = get();
       if (!roomId || !token) return;
 
@@ -962,6 +985,12 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
 
     // P2P Transfer coordinator bridge
+    getTransferBlob: (transferId: string): Blob | undefined => {
+      const key = transferBlobKeys.get(transferId);
+      if (!key) return undefined;
+      return transferBlobs.get(key);
+    },
+
     initiateFileTransfer: async (peerId, file) => {
       const peer = get().peers.get(peerId);
       if (!peer || !peer.transferCoordinator) {
@@ -971,9 +1000,14 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
       const tid = await peer.transferCoordinator.sendFile(file);
       
+      const blobKey: object = {};
+      if (file.size > 0) {
+        transferBlobs.set(blobKey, new Blob([file], { type: file.type }));
+        transferBlobKeys.set(tid, blobKey);
+      }
+
       set((s) => {
         const updatedTransfers = new Map(s.activeTransfers);
-        const fileBlob = file.size > 0 ? new Blob([file], { type: file.type }) : undefined;
         updatedTransfers.set(tid, {
           peerId,
           fileName: file.name,
@@ -984,7 +1018,6 @@ export const useRoomStore = create<RoomState>((set, get) => {
           speedBytesPerSec: 0,
           etaSec: 0,
           status: 'pending',
-          blob: fileBlob,
         });
 
         const fileMsg: ChatMessage = {
@@ -1055,6 +1088,35 @@ export const useRoomStore = create<RoomState>((set, get) => {
       if (peer?.transferCoordinator) {
         peer.transferCoordinator.cancelTransfer(transferId);
       }
+      const key = transferBlobKeys.get(transferId);
+      if (key) {
+        transferBlobs.delete(key);
+        transferBlobKeys.delete(transferId);
+      }
+    },
+
+    acceptPendingTransfer: (transferId) => {
+      const pending = get().pendingTransfers.find(t => t.transferId === transferId);
+      if (!pending) return;
+      for (const [, peer] of get().peers) {
+        if (peer.transferCoordinator) {
+          peer.transferCoordinator.acceptTransfer(transferId);
+        }
+      }
+      set((s) => ({
+        pendingTransfers: s.pendingTransfers.filter(t => t.transferId !== transferId),
+      }));
+    },
+
+    rejectPendingTransfer: (transferId) => {
+      for (const [, peer] of get().peers) {
+        if (peer.transferCoordinator) {
+          peer.transferCoordinator.cancelTransfer(transferId);
+        }
+      }
+      set((s) => ({
+        pendingTransfers: s.pendingTransfers.filter(t => t.transferId !== transferId),
+      }));
     }
   };
 });
