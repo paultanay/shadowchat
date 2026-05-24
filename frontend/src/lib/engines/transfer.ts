@@ -43,6 +43,30 @@ export interface FileTransferEvents {
   onFailed?: (transferId: string, error: string) => void;
 }
 
+interface OutgoingTransferState {
+  file: File;
+  fileKey: CryptoKey;
+  paused: boolean;
+  cancelled: boolean;
+  lastSentIndex: number;
+}
+
+interface IncomingTransferMeta {
+  fileName: string;
+  sizeBytes: number;
+  fileType: string;
+  hash: string;
+}
+
+interface IncomingTransferState {
+  meta: IncomingTransferMeta;
+  fileKey: CryptoKey;
+  paused: boolean;
+  cancelled: boolean;
+  chunksReceivedCount: number;
+  totalChunks: number;
+}
+
 export class FileTransferCoordinator {
   private pcManager: PeerConnectionManager;
   private roomKey: CryptoKey;
@@ -50,27 +74,9 @@ export class FileTransferCoordinator {
   private events: FileTransferEvents;
 
   // Track active transfers
-  private activeOutgoing: Map<string, {
-    file: File;
-    fileKey: CryptoKey;
-    paused: boolean;
-    cancelled: boolean;
-    lastSentIndex: number;
-  }> = new Map();
+  private activeOutgoing: Map<string, OutgoingTransferState> = new Map();
 
-  private activeIncoming: Map<string, {
-    meta: {
-      fileName: string;
-      sizeBytes: number;
-      fileType: string;
-      hash: string;
-    };
-    fileKey: CryptoKey;
-    paused: boolean;
-    cancelled: boolean;
-    chunksReceivedCount: number;
-    totalChunks: number;
-  }> = new Map();
+  private activeIncoming: Map<string, IncomingTransferState> = new Map();
 
   constructor(
     pcManager: PeerConnectionManager,
@@ -85,24 +91,17 @@ export class FileTransferCoordinator {
   }
 
   /**
-   * Initializes control listeners on the PeerConnectionManager.
+   * Channels messages from the PeerConnectionManager to this coordinator.
+   * Called from the roomStore's onMessage handler so both initiator and
+   * receiver peers have their data correctly routed regardless of when
+   * data channels were created.
    */
-  public registerListeners(): void {
-    const controlChannel = this.pcManager.controlChannel;
-    if (controlChannel) {
-      const originalOnMessage = controlChannel.onmessage;
-      controlChannel.onmessage = (event) => {
-        if (originalOnMessage) originalOnMessage.call(controlChannel, event);
-        this.handleControlMessage(event.data);
-      };
+  public handleChannelMessage(label: string, data: string | ArrayBuffer): void {
+    if (label === 'control' && typeof data === 'string') {
+      this.handleControlMessage(data);
+    } else if (label.startsWith('data-') && data instanceof ArrayBuffer) {
+      this.handleDataMessage(data);
     }
-
-    // Intercept incoming data channels messages
-    this.pcManager.dataChannels.forEach((dc) => {
-      dc.onmessage = (event) => {
-        this.handleDataMessage(event.data);
-      };
-    });
   }
 
   /**
@@ -458,7 +457,8 @@ export class FileTransferCoordinator {
 
         // Calculate progress stats
         const currentBytes = end;
-        const speed = (currentBytes - bytesTransferredStart) / ((Date.now() - startTime) / 1000 || 1);
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? (currentBytes - bytesTransferredStart) / elapsed : 0;
         const eta = speed > 0 ? (file.size - currentBytes) / speed : 0;
         const progress = Math.min(99.9, (currentBytes / file.size) * 100);
 
@@ -575,7 +575,7 @@ export class FileTransferCoordinator {
   /**
    * Reassembles the stored file chunks, decrypts them, and verifies integrity.
    */
-  private async reassembleFile(transferId: string, incoming: any): Promise<void> {
+  private async reassembleFile(transferId: string, incoming: IncomingTransferState): Promise<void> {
     const meta = await getFileMeta(transferId);
     if (meta) {
       meta.status = 'verifying';
@@ -625,9 +625,7 @@ export class FileTransferCoordinator {
       for (const chunk of chunks) {
         const chunkData = new Uint8Array(chunk.data);
         const iv = chunkData.subarray(0, 12);
-        const ciphertext = chunkData.subarray(12);
-        
-        const decrypted = await decryptAESGCM(incoming.fileKey, ciphertext.buffer, iv);
+        const decrypted = await decryptAESGCM(incoming.fileKey, chunkData.buffer.slice(12), iv);
         decryptedBuffers.push(decrypted);
       }
 
@@ -671,12 +669,16 @@ export class FileTransferCoordinator {
     if (dc.bufferedAmount < BUFFER_HIGH_WATERMARK) return;
 
     return new Promise<void>((resolve) => {
-      const originalThreshold = dc.bufferedAmountLowThreshold;
       dc.bufferedAmountLowThreshold = BUFFER_LOW_WATERMARK;
+
+      // Guard: already below threshold between the check above and setting the threshold
+      if (dc.bufferedAmount < BUFFER_LOW_WATERMARK) {
+        resolve();
+        return;
+      }
 
       const onLow = () => {
         dc.removeEventListener('bufferedamountlow', onLow);
-        dc.bufferedAmountLowThreshold = originalThreshold;
         resolve();
       };
 

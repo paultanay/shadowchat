@@ -37,7 +37,7 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 	app.Use(recover.New())
 	app.Use(middleware.StructuredLogger(logger))
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "https://shadowchat.local, https://localhost, http://localhost, https://localhost:3000, http://localhost:3000, https://127.0.0.1, http://127.0.0.1",
+		AllowOrigins:     "https://shadowchat.local, https://localhost, http://localhost, https://localhost:3000, http://localhost:3000, https://localhost:3001, http://localhost:3001, https://127.0.0.1, http://127.0.0.1",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
 		AllowCredentials: true,

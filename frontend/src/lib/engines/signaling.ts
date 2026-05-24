@@ -39,7 +39,7 @@ export class SignalingClient {
       const host = window.location.host;
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('shadowchat.local')) {
-        if (host.includes(':3000')) {
+        if (host.includes(':3000') || host.includes(':3001')) {
           wsBase = `${wsProtocol}//${window.location.hostname}:8080/ws`;
         } else {
           wsBase = `${wsProtocol}//${host}/ws`;
@@ -85,14 +85,23 @@ export class SignalingClient {
         // ws close will trigger reconnect logic
       };
 
-      this.socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.handleMessage(data);
-        } catch (err) {
-          // ignore invalid json frames
-        }
-      };
+this.socket.onmessage = (event) => {
+  const lines = event.data.split('\n').filter(Boolean);
+  for (const line of lines) {
+    let data: any;
+    try {
+      data = JSON.parse(line);
+    } catch (err) {
+      console.error('[Signaling] Invalid JSON line:', line, err);
+      continue;
+    }
+    try {
+      this.handleMessage(data);
+    } catch (err) {
+      console.error('[Signaling] Handler error:', data, err);
+    }
+  }
+};
     } catch (err) {
       // socket init error
     }

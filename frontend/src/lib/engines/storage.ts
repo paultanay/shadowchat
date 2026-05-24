@@ -29,6 +29,7 @@ export interface StoredMessage {
   roomId: string;
   peerId: string;
   encryptedText: string; // Base64 ciphertext of chat message
+  iv: string; // Base64 IV for AES-GCM decryption
   timestamp: number;
 }
 

@@ -76,31 +76,41 @@ export default function RoomPage({ params }: PageProps) {
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Warn before leaving/reloading the room
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
 
   // Initialize and connect to signaling
   useEffect(() => {
     if (!roomId) return;
+    let cancelled = false;
     
     const initialize = async () => {
       const activeToken = token || sessionStorage.getItem(`token_${roomId}`);
       const activeRole = roomRole || (sessionStorage.getItem(`role_${roomId}`) as 'owner' | 'member');
 
       if (activeToken && activeRole) {
-        // Cache in session storage for refresh safety
         sessionStorage.setItem(`token_${roomId}`, activeToken);
         sessionStorage.setItem(`role_${roomId}`, activeRole);
 
         await connectSignaling(roomId, activeToken, activeRole);
+        if (cancelled) return;
       } else {
-        // Try auto-join using the room code/UUID
         try {
           let targetCode = roomId;
           
           if (roomId.length === 36) {
-            // Get API Base dynamically
             const apiBase = typeof window !== 'undefined'
               ? (window.location.host.includes('localhost') || window.location.host.includes('127.0.0.1') || window.location.host.includes('shadowchat.local')
-                ? `${window.location.protocol}//${window.location.host.includes(':3000') ? window.location.hostname + ':8080' : window.location.host}/api/v1`
+                ? `${window.location.protocol}//${(window.location.host.includes(':3000') || window.location.host.includes(':3001')) ? window.location.hostname + ':8080' : window.location.host}/api/v1`
                 : process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1')
               : 'https://api.shadowchat.local/api/v1';
 
@@ -120,6 +130,7 @@ export default function RoomPage({ params }: PageProps) {
           });
 
           const realRoomId = await joinRoom(targetCode);
+          if (cancelled) return;
           
           const newState = useRoomStore.getState();
           const newToken = newState.token;
@@ -138,13 +149,14 @@ export default function RoomPage({ params }: PageProps) {
             throw new Error("Failed to retrieve join tokens from server");
           }
         } catch (err: any) {
+          if (cancelled) return;
           showToast({
             type: "error",
             title: "Access Denied",
             message: err.message || "Failed to join room. Room may be locked, expired, or full.",
           });
           setTimeout(() => {
-            window.location.href = "/";
+            if (!cancelled) window.location.href = "/";
           }, 3000);
         }
       }
@@ -153,6 +165,7 @@ export default function RoomPage({ params }: PageProps) {
     initialize();
 
     return () => {
+      cancelled = true;
       disconnectRoom();
     };
   }, [roomId]);
@@ -194,21 +207,93 @@ export default function RoomPage({ params }: PageProps) {
     e.preventDefault();
     setIsDragging(false);
     
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      await handleFileSelect(files[0]);
+    const items = e.dataTransfer.items;
+    if (items && items.length > 0) {
+      const filePromises: Promise<File>[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) {
+          const files = await traverseDirectory(entry);
+          for (const f of files) {
+            filePromises.push(Promise.resolve(f));
+          }
+        }
+      }
+      const allFiles = await Promise.all(filePromises);
+      if (allFiles.length > 10) {
+        showToast({
+          type: "info",
+          title: "Bulk Transfer",
+          message: `Queueing ${allFiles.length} files...`,
+        });
+      }
+      for (const file of allFiles) {
+        await handleFileSelect(file);
+      }
+    } else {
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          await handleFileSelect(files[i]);
+        }
+      }
     }
+  };
+
+  const traverseDirectory = async (
+    entry: FileSystemEntry,
+    files: File[] = []
+  ): Promise<File[]> => {
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      const file = await new Promise<File>((resolve, reject) => {
+        fileEntry.file(resolve, reject);
+      });
+      files.push(file);
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const reader = dirEntry.createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+      });
+      for (const child of entries) {
+        await traverseDirectory(child, files);
+      }
+    }
+    return files;
   };
 
   const handleFileClick = () => {
     fileInputRef.current?.click();
   };
 
+  const handleFolderClick = () => {
+    folderInputRef.current?.click();
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      await handleFileSelect(files[0]);
+      for (let i = 0; i < files.length; i++) {
+        await handleFileSelect(files[i]);
+      }
     }
+    e.target.value = '';
+  };
+
+  const handleFolderChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      showToast({
+        type: "info",
+        title: "Uploading Folder",
+        message: `Queueing ${files.length} file(s) from folder...`,
+      });
+      for (let i = 0; i < files.length; i++) {
+        await handleFileSelect(files[i]);
+      }
+    }
+    e.target.value = '';
   };
 
   const handleFileSelect = async (file: File) => {
@@ -274,11 +359,11 @@ export default function RoomPage({ params }: PageProps) {
     return `${window.location.origin}/room/${roomCode || roomId}${hash}`;
   };
 
-  // Loading Screen redesign
-  if (!token) {
+  // Show loading only if token is missing from BOTH Zustand and sessionStorage
+  const hasToken = token || (typeof window !== 'undefined' && sessionStorage.getItem(`token_${roomId}`));
+  if (!hasToken) {
     return (
       <div className="relative min-h-screen flex items-center justify-center bg-bg-primary text-text-primary overflow-hidden">
-        {/* Ambient mesh background */}
         <div className="absolute -left-40 top-20 h-[500px] w-[500px] rounded-full bg-accent-glow opacity-25 blur-3xl spin-slow pointer-events-none" />
         <div className="absolute -right-20 bottom-20 h-[450px] w-[450px] rounded-full bg-accent-warning/5 opacity-15 blur-3xl pointer-events-none" />
 
@@ -622,8 +707,7 @@ export default function RoomPage({ params }: PageProps) {
                               {status === 'transferring' && (
                                 <button 
                                   onClick={() => {
-                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
-                                    pauseFileTransfer(pid, msg.transferId!);
+                                    pauseFileTransfer(transfer!.peerId, msg.transferId!);
                                   }}
                                   className="p-1.5 rounded-lg bg-bg-secondary hover:bg-bg-primary text-text-primary border border-border-glass transition-all cursor-pointer flex items-center justify-center"
                                   title="Pause"
@@ -635,8 +719,7 @@ export default function RoomPage({ params }: PageProps) {
                               {status === 'paused' && (
                                 <button 
                                   onClick={() => {
-                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
-                                    resumeFileTransfer(pid, msg.transferId!);
+                                    resumeFileTransfer(transfer!.peerId, msg.transferId!);
                                   }}
                                   className="p-1.5 rounded-lg bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary border border-accent-primary/20 transition-all cursor-pointer flex items-center justify-center"
                                   title="Resume"
@@ -648,8 +731,7 @@ export default function RoomPage({ params }: PageProps) {
                               {(status === 'transferring' || status === 'paused' || status === 'pending') && (
                                 <button 
                                   onClick={() => {
-                                    const pid = Array.from(peers.keys())[0] || msg.peerId;
-                                    cancelFileTransfer(pid, msg.transferId!);
+                                    cancelFileTransfer(transfer!.peerId, msg.transferId!);
                                   }}
                                   className="p-1.5 rounded-lg bg-red-500/5 hover:bg-red-500/10 text-accent-danger border border-red-500/20 transition-all cursor-pointer flex items-center justify-center"
                                   title="Cancel"
@@ -756,20 +838,40 @@ export default function RoomPage({ params }: PageProps) {
 
               {/* Chat Panel Input Form */}
               <form onSubmit={handleSendChat} className="p-3 bg-bg-secondary/30 border-t border-border-glass flex items-center gap-2 shrink-0">
-                {/* Hidden File Input & Attach Button */}
+                {/* Hidden File Inputs & Attach Buttons */}
                 <input 
                   type="file" 
                   ref={fileInputRef} 
                   onChange={handleFileChange} 
                   className="hidden" 
+                  multiple
+                />
+                <input 
+                  type="file" 
+                  ref={folderInputRef} 
+                  onChange={handleFolderChange} 
+                  className="hidden" 
+                  // @ts-ignore - webkitdirectory is a non-standard attribute
+                  webkitdirectory=""
+                  directory=""
                 />
                 <button 
                   type="button" 
                   onClick={handleFileClick}
                   className="p-2.5 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass text-accent-primary hover:text-accent-primary/80 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-elegant"
-                  title="Attach File"
+                  title="Attach Files"
                 >
                   <Paperclip className="w-4 h-4" />
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleFolderClick}
+                  className="p-2.5 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass text-accent-primary hover:text-accent-primary/80 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-elegant"
+                  title="Upload Folder"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
                 </button>
 
                 <input 

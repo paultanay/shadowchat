@@ -31,7 +31,6 @@ func GenerateTurnCredentials(turnSecret string, peerID string, ttl time.Duration
 		URLs: []string{
 			"turn:shadowchat.local:3478?transport=udp",
 			"turn:shadowchat.local:3478?transport=tcp",
-			"turns:shadowchat.local:5349?transport=udp",
 			"turns:shadowchat.local:5349?transport=tcp",
 		},
 	}
