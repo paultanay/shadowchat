@@ -872,7 +872,7 @@ export default function RoomPage({ params }: PageProps) {
                   ref={folderInputRef} 
                   onChange={handleFolderChange} 
                   className="hidden" 
-                  // @ts-ignore - webkitdirectory is a non-standard attribute
+                  // @ts-expect-error - webkitdirectory is a non-standard attribute
                   webkitdirectory=""
                   directory=""
                 />

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Camera, AlertTriangle, ShieldAlert } from "lucide-react";
+import { X, Camera, ShieldAlert } from "lucide-react";
 import jsQR from "jsqr";
 
 interface QRScannerModalProps {
@@ -18,50 +18,11 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
   const [isScanning, setIsScanning] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const scanningRef = useRef(false);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    setCameraError(null);
-    setIsScanning(true);
-
-    const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        });
-        streamRef.current = stream;
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute("playsinline", "true"); // required for iOS
-          videoRef.current.play();
-          
-          // Start the scanning loop once video is loaded
-          videoRef.current.onloadedmetadata = () => {
-            startScanLoop();
-          };
-        }
-      } catch (err: any) {
-        console.error("Camera access failed:", err);
-        setCameraError(
-          err.name === "NotAllowedError" 
-            ? "Camera permission denied. Please enable camera access in your browser settings to scan QR codes."
-            : "Could not access camera. Please check your camera connection and try again."
-        );
-        setIsScanning(false);
-      }
-    };
-
-    startCamera();
-
-    return () => {
-      stopCamera();
-    };
-  }, [isOpen]);
-
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     setIsScanning(false);
+    scanningRef.current = false;
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -73,9 +34,9 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-  };
+  }, []);
 
-  const startScanLoop = () => {
+  const startScanLoop = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -85,43 +46,36 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
 
     const scan = () => {
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        // Match canvas dimensions to video
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        
+
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
+
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: "dontInvert",
         });
 
         if (code) {
-          // Successfully read QR code!
           const resultUrl = code.data;
-          console.log("QR Code read successfully:", resultUrl);
-          
           try {
-            // Expected URL format: https://shadowchat.local/room/ROOM_CODE#key=KEY
-            // Or relative /room/ROOM_CODE#key=KEY
             const parsedUrl = new URL(resultUrl, window.location.origin);
             const pathParts = parsedUrl.pathname.split("/");
             const roomCode = pathParts[pathParts.length - 1];
-            
+
             const hash = parsedUrl.hash;
             let roomKey = undefined;
             if (hash && hash.startsWith("#key=")) {
               roomKey = hash.substring(5);
             }
-            
+
             if (roomCode) {
               stopCamera();
               onScanSuccess(roomCode, roomKey);
               onClose();
               return;
             }
-          } catch (e) {
-            // If QR code is not a URL, try treating the whole text as the room code
+          } catch {
             if (resultUrl && resultUrl.length >= 6 && resultUrl.length <= 40) {
               stopCamera();
               onScanSuccess(resultUrl.trim());
@@ -131,14 +85,57 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
           }
         }
       }
-      
-      if (isScanning) {
+
+      if (scanningRef.current) {
         animationFrameRef.current = requestAnimationFrame(scan);
       }
     };
 
     animationFrameRef.current = requestAnimationFrame(scan);
-  };
+  }, [stopCamera, onScanSuccess, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    scanningRef.current = true;
+    const startCamera = async () => {
+      setIsScanning(true);
+      setCameraError(null);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        streamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute("playsinline", "true");
+          videoRef.current.play();
+
+          videoRef.current.onloadedmetadata = () => {
+            startScanLoop();
+          };
+        }
+      } catch (err) {
+        console.error("Camera access failed:", err);
+        const typedErr = err as { name?: string };
+        setCameraError(
+          typedErr.name === "NotAllowedError"
+            ? "Camera permission denied. Please enable camera access in your browser settings to scan QR codes."
+            : "Could not access camera. Please check your camera connection and try again."
+        );
+        setIsScanning(false);
+        scanningRef.current = false;
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      stopCamera();
+    };
+  }, [isOpen, startScanLoop, stopCamera]);
 
   const handleClose = () => {
     stopCamera();
@@ -154,7 +151,6 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Backdrop */}
           <motion.div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
             initial={{ opacity: 0 }}
@@ -163,7 +159,6 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
             onClick={handleClose}
           />
 
-          {/* Modal Container */}
           <motion.div
             className="relative sc-glass rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-6 overflow-hidden border border-border-glass"
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -171,10 +166,8 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", stiffness: 400, damping: 30 }}
           >
-            {/* Ambient neon decorative backglow */}
             <div className="absolute -top-12 -left-12 w-32 h-32 bg-accent-primary/10 rounded-full blur-2xl pointer-events-none" />
 
-            {/* Header */}
             <div className="flex items-center justify-between pb-2">
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent-primary/10 border border-accent-primary/30">
@@ -195,7 +188,6 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
               </button>
             </div>
 
-            {/* Scanner Viewer */}
             <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-bg-secondary/40 border border-border-glass flex flex-col items-center justify-center">
               {cameraError ? (
                 <div className="p-6 text-center space-y-4 max-w-xs">
@@ -207,25 +199,19 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                 </div>
               ) : (
                 <>
-                  {/* Video Element */}
                   <video
                     ref={videoRef}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
-                  
-                  {/* Hidden Canvas for Frame Processing */}
                   <canvas ref={canvasRef} className="hidden" />
 
-                  {/* Cyber/Neon Target Framing Overlay */}
                   <div className="absolute inset-0 pointer-events-none border-[24px] border-black/40 flex items-center justify-center">
                     <div className="relative w-48 h-48 border border-white/20 rounded-xl">
-                      {/* L-Shape Corner brackets */}
                       <div className="absolute -top-1.5 -left-1.5 w-6 h-6 border-t-4 border-l-4 border-accent-primary rounded-tl-lg" />
                       <div className="absolute -top-1.5 -right-1.5 w-6 h-6 border-t-4 border-r-4 border-accent-primary rounded-tr-lg" />
                       <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 border-b-4 border-l-4 border-accent-primary rounded-bl-lg" />
                       <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 border-b-4 border-r-4 border-accent-primary rounded-br-lg" />
 
-                      {/* Moving laser scanner line */}
                       {isScanning && (
                         <motion.div
                           className="absolute left-0 right-0 h-0.5 bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
@@ -236,7 +222,6 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                     </div>
                   </div>
 
-                  {/* Scanning instructions overlay */}
                   <div className="absolute bottom-4 left-0 right-0 text-center pointer-events-none">
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold tracking-wider uppercase rounded-full bg-black/60 backdrop-blur-sm border border-white/10 text-white shadow-lg">
                       <span className="w-1.5 h-1.5 rounded-full bg-accent-primary animate-pulse" />
@@ -246,7 +231,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                 </>
               )}
             </div>
-            
+
             <div className="text-center text-xs text-text-muted leading-relaxed">
               Camera access is terminated instantly when you close this window. Your biometric data never exits your browser.
             </div>

@@ -14,6 +14,7 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
   const [uiState, setUiState] = useState<UIState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [amplitude, setAmplitude] = useState(0);
+  const [tick, setTick] = useState(0);
   const [slideTarget, setSlideTarget] = useState<'none' | 'lock' | 'cancel'>('none');
 
   const recorderRef = useRef<RecorderEngine | null>(null);
@@ -137,6 +138,12 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (uiState !== 'recording-bar' && uiState !== 'recording-live') return;
+    const id = requestAnimationFrame(() => setTick(performance.now()));
+    return () => cancelAnimationFrame(id);
+  }, [uiState, tick]);
+
   const formatElapsed = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -157,7 +164,7 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
         <div className="flex items-center gap-2 flex-grow min-w-0">
           <div className="flex items-end gap-[3px] h-6">
             {[0,1,2,3,4].map((i) => {
-              const barH = Math.max(4, (amplitude * 100) * (0.5 + Math.sin(Date.now() / 200 + i * 1.5) * 0.3 + 0.5));
+              const barH = Math.max(4, (amplitude * 100) * (0.5 + Math.sin(tick / 200 + i * 1.5) * 0.3 + 0.5));
               return (
                 <div key={i} className="w-[3px] rounded-full bg-accent-primary transition-all duration-100"
                   style={{ height: `${Math.min(100, barH)}%` }}
@@ -203,7 +210,7 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-bg-tertiary border border-border-glass rounded-lg shadow-elegant whitespace-nowrap flex items-center gap-2 pointer-events-none">
           <div className="flex items-end gap-[2px] h-4">
             {[0,1,2,3,4].map((i) => {
-              const barH = Math.max(3, (amplitude * 100) * (0.5 + Math.sin(Date.now() / 150 + i * 1.5) * 0.3 + 0.5));
+              const barH = Math.max(3, (amplitude * 100) * (0.5 + Math.sin(tick / 150 + i * 1.5) * 0.3 + 0.5));
               return (
                 <div key={i} className="w-[2px] rounded-full bg-accent-primary transition-all duration-100"
                   style={{ height: `${Math.min(100, barH)}%` }}
