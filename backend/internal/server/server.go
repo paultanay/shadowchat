@@ -55,10 +55,10 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 
 	// Connect to PostgreSQL with retry
 	var (
-		db      *repository.DB
-		rdb     *redis.Cache
-		broker  *nats.Broker
-		err     error
+		db     *repository.DB
+		rdb    *redis.Cache
+		broker *nats.Broker
+		err    error
 	)
 	for i := 0; i < 5; i++ {
 		db, err = repository.ConnectDB(cfg.DatabaseURL, logger)

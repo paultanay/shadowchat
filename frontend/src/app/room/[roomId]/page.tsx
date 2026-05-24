@@ -79,13 +79,28 @@ export default function RoomPage({ params }: PageProps) {
   const [inputText, setInputText] = useState("");
   const [isCopied, setIsCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
-  const [pendingTransfer, setPendingTransfer] = useState<{ transferId: string; fileName: string; sizeBytes: number; fileType: string } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const beforeUnloadHandler = useRef<(e: BeforeUnloadEvent) => void>(() => {});
+
+  // Warn before leaving/reloading the room
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    beforeUnloadHandler.current = handler;
+    window.addEventListener('beforeunload', handler);
+    return () => {
+      window.removeEventListener('beforeunload', handler);
+      beforeUnloadHandler.current = () => {};
+    };
+  }, []);
 
   // Initialize and connect to signaling
   useEffect(() => {
@@ -169,13 +184,8 @@ export default function RoomPage({ params }: PageProps) {
     };
   }, [roomId]);
 
-  // React to pending transfer requests
-  useEffect(() => {
-    if (pendingTransfers.length > 0) {
-      const latest = pendingTransfers[pendingTransfers.length - 1];
-      setPendingTransfer(latest);
-    }
-  }, [pendingTransfers]);
+  // Derive latest pending transfer inline (not via useEffect to avoid cascading renders)
+  const latestPending = pendingTransfers.length > 0 ? pendingTransfers[pendingTransfers.length - 1] : null;
 
   // Scroll to bottom of chat when new message arrives
   useEffect(() => {
@@ -936,6 +946,7 @@ export default function RoomPage({ params }: PageProps) {
         onConfirm={() => {
           setShowLeaveConfirm(false);
           disconnectRoom();
+          window.removeEventListener('beforeunload', beforeUnloadHandler.current);
           window.location.href = "/";
         }}
         onCancel={() => setShowLeaveConfirm(false)}
@@ -961,17 +972,15 @@ export default function RoomPage({ params }: PageProps) {
       />
 
       <ConfirmDialog
-        isOpen={pendingTransfer !== null}
+        isOpen={latestPending !== null}
         onConfirm={() => {
-          if (pendingTransfer) acceptPendingTransfer(pendingTransfer.transferId);
-          setPendingTransfer(null);
+          if (latestPending) acceptPendingTransfer(latestPending.transferId);
         }}
         onCancel={() => {
-          if (pendingTransfer) rejectPendingTransfer(pendingTransfer.transferId);
-          setPendingTransfer(null);
+          if (latestPending) rejectPendingTransfer(latestPending.transferId);
         }}
         title="Incoming File Transfer"
-        message={pendingTransfer ? `${pendingTransfer.fileName} (${(pendingTransfer.sizeBytes / 1024).toFixed(1)} KB) wants to send you a file. Accept?` : ''}
+        message={latestPending ? `${latestPending.fileName} (${(latestPending.sizeBytes / 1024).toFixed(1)} KB) wants to send you a file. Accept?` : ''}
         confirmLabel="Accept"
         cancelLabel="Reject"
         variant="default"
