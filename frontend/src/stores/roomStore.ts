@@ -897,6 +897,25 @@ export const useRoomStore = create<RoomState>((set, get) => {
         };
       });
 
+      const roomId = get().roomId;
+      if (roomId) {
+        try {
+          await saveMessage({
+            roomId,
+            peerId: peerId,
+            encryptedText: JSON.stringify({
+              type: file.type,
+              name: file.name,
+              size: file.size,
+            }),
+            iv: '',
+            timestamp: Date.now(),
+          });
+        } catch (err) {
+          console.warn('Failed to persist outgoing file message:', err);
+        }
+      }
+
       return tid;
     },
 
