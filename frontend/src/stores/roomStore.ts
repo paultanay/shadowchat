@@ -691,6 +691,20 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 return { peers: updatedPeers };
               });
 
+              // Send recent history to the newly connected peer
+              const currentMessages = get().messages;
+              if (currentMessages.length > 0) {
+                const recentMessages = currentMessages.slice(-50);
+                const historyBundle = {
+                  type: 'history-bundle',
+                  messages: recentMessages,
+                };
+                const peerObj = get().peers.get(from);
+                if (peerObj?.pcManager?.controlChannel?.readyState === 'open') {
+                  peerObj.pcManager.controlChannel.send(JSON.stringify(historyBundle));
+                }
+              }
+
               // Load persisted history only once (messages array is empty)
               if (get().messages.length === 0) {
                 const cachedMessages = await getRoomMessages(roomId);
