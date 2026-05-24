@@ -20,11 +20,16 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pointerStartRef = useRef({ x: 0, y: 0 });
+  const capturedPointerRef = useRef<number | null>(null);
   const isRecordingActive = useRef(false);
 
   const cleanupRecording = useCallback(() => {
     clearInterval(timerRef.current);
     clearTimeout(holdTimerRef.current);
+    if (capturedPointerRef.current !== null) {
+      // release happens automatically on pointerup, but ensure it's cleared
+      capturedPointerRef.current = null;
+    }
     recorderRef.current?.cancel();
     recorderRef.current = null;
     isRecordingActive.current = false;
@@ -51,7 +56,9 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     } catch (err: any) {
       isRecordingActive.current = false;
       if (err.name === 'NotAllowedError') {
-        alert('Microphone access denied.');
+        alert('Microphone access denied. Please allow microphone access in your browser settings.');
+      } else {
+        console.error('Failed to start recording:', err);
       }
     }
   }, []);
@@ -80,13 +87,14 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     pointerStartRef.current = { x: e.clientX, y: e.clientY };
 
     if (e.pointerType === 'mouse') {
-      startRecording().then(() => setUiState('recording-bar'));
+      startRecording().then(() => setUiState('recording-bar')).catch(() => {});
     } else {
       holdTimerRef.current = setTimeout(async () => {
         await startRecording();
         setUiState('recording-live');
         const target = e.currentTarget as HTMLElement;
         target.setPointerCapture(e.pointerId);
+        capturedPointerRef.current = e.pointerId;
       }, 200);
     }
   };
@@ -170,8 +178,9 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={(e) => {
-        if (e.pointerType !== 'touch' || uiState !== 'recording-live') return;
+        if (e.pointerType !== 'touch') return;
         clearTimeout(holdTimerRef.current);
+        if (uiState !== 'recording-live') return;
         if (slideTarget === 'cancel') cleanupRecording();
         else if (slideTarget === 'lock') { setUiState('recording-bar'); setSlideTarget('none'); }
         else stopAndSend();
