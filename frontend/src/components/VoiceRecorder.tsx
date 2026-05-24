@@ -82,8 +82,8 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     if (e.pointerType === 'mouse') {
       startRecording().then(() => setUiState('recording-bar'));
     } else {
-      holdTimerRef.current = setTimeout(() => {
-        startRecording();
+      holdTimerRef.current = setTimeout(async () => {
+        await startRecording();
         setUiState('recording-live');
         const target = e.currentTarget as HTMLElement;
         target.setPointerCapture(e.pointerId);
