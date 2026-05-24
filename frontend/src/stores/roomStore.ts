@@ -588,7 +588,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
                             current.progress = progress.progress;
                             current.speedBytesPerSec = progress.speedBytesPerSec;
                             current.etaSec = progress.etaSec;
-                            current.status = 'transferring';
+                            current.status = progress.progress >= 100 ? 'completed' : 'transferring';
                             updatedTransfers.set(progress.transferId, current);
                           }
                           return { activeTransfers: updatedTransfers };
@@ -642,12 +642,6 @@ export const useRoomStore = create<RoomState>((set, get) => {
                           }
                           return { activeTransfers: updatedTransfers };
                         });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = name;
-                        a.click();
-                        URL.revokeObjectURL(url);
                         useUIStore.getState().showToast({
                           type: 'success',
                           title: 'Transfer Completed',
@@ -655,6 +649,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
                         });
                       },
                       onFailed: (tid, error) => {
+                        console.error('[transfer.onFailed] tid=', tid.substring(0, 8), 'error=', error);
                         set((s) => {
                           const updatedTransfers = new Map(s.activeTransfers);
                           const current = updatedTransfers.get(tid);
@@ -862,6 +857,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     initiateFileTransfer: async (peerId, file) => {
       const peer = get().peers.get(peerId);
       if (!peer || !peer.transferCoordinator) {
+        console.warn('[initiateFileTransfer] peer or coordinator missing, peerId=', peerId?.substring(0, 8));
         throw new Error('Peer not fully connected (secure channel pending)');
       }
 
@@ -869,6 +865,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       
       set((s) => {
         const updatedTransfers = new Map(s.activeTransfers);
+        const fileBlob = file.size > 0 ? new Blob([file], { type: file.type }) : undefined;
         updatedTransfers.set(tid, {
           peerId,
           fileName: file.name,
@@ -879,6 +876,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
           speedBytesPerSec: 0,
           etaSec: 0,
           status: 'pending',
+          blob: fileBlob,
         });
 
         const fileMsg: ChatMessage = {

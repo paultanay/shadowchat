@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Play, Pause } from "lucide-react";
+import { Play, Pause, X } from "lucide-react";
 import { computeWaveform } from "@/lib/engines/voice";
 
 interface VoiceNoteProps {
@@ -20,28 +20,46 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioError, setAudioError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animationRef = useRef<number>(0);
+  const erroredRef = useRef(false);
 
   useEffect(() => {
+    erroredRef.current = false;
     computeWaveform(blob, 40).then(setWaveform).catch((err) => {
       console.warn('[VoiceNote] Waveform computation failed:', err);
     });
-    const audio = new Audio(URL.createObjectURL(blob));
-    const onMeta = () => setDuration(audio.duration);
+    const cleanType = blob.type.startsWith('audio/webm') ? blob.type.split(';')[0] : blob.type;
+    const safeBlob = new Blob([blob], { type: cleanType });
+    const url = URL.createObjectURL(safeBlob);
+    const audio = new Audio(url);
+    const onMeta = () => {
+      setDuration(audio.duration);
+      setAudioError(false);
+    };
     const onEnd = () => {
       setPlaying(false);
       setCurrentTime(0);
     };
+    const onError = () => {
+      console.warn('[VoiceNote] Audio element error for type:', safeBlob.type);
+      if (!erroredRef.current) {
+        erroredRef.current = true;
+        setAudioError(true);
+      }
+    };
     audio.addEventListener('loadedmetadata', onMeta);
     audio.addEventListener('ended', onEnd);
+    audio.addEventListener('error', onError);
     audioRef.current = audio;
     return () => {
       cancelAnimationFrame(animationRef.current);
       audio.pause();
       audio.removeEventListener('loadedmetadata', onMeta);
       audio.removeEventListener('ended', onEnd);
-      URL.revokeObjectURL(audio.src);
+      audio.removeEventListener('error', onError);
+      URL.revokeObjectURL(url);
     };
   }, [blob]);
 
@@ -81,9 +99,11 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
         onClick={togglePlay}
         className={`shrink-0 w-9 h-9 rounded-full border border-border-glass flex items-center justify-center transition-all cursor-pointer ${isSelf ? 'bg-accent-primary/10 hover:bg-accent-primary/20' : 'bg-bg-secondary hover:bg-bg-primary'}`}
       >
-        {playing
-          ? <Pause className="w-4 h-4 text-text-primary" />
-          : <Play className={`w-4 h-4 ml-0.5 ${isSelf ? 'text-accent-primary' : 'text-accent-primary'}`} />
+        {audioError
+          ? <X className="w-4 h-4 text-accent-danger" />
+          : playing
+            ? <Pause className="w-4 h-4 text-text-primary" />
+            : <Play className="w-4 h-4 ml-0.5 text-accent-primary" />
         }
       </button>
 
@@ -95,9 +115,9 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
           aria-label="Seek"
           tabIndex={0}
         >
-          {waveform.map((val, i) => {
-            const barPct = Math.max(4, val * 100);
-            const isPlayed = i / waveform.length <= progress;
+          {(waveform.length > 0 ? waveform : Array(40).fill(0.5)).map((val, i) => {
+            const barPct = Math.max(4, (val || 0.5) * 100);
+            const isPlayed = i / 40 <= progress;
             return (
               <div
                 key={i}

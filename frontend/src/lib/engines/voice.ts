@@ -44,7 +44,7 @@ export class VoiceRecorder {
         this.cleanup();
       };
 
-      this.recorder.start(100);
+      this.recorder.start();
 
       this.audioContext = new AudioContext();
       const source = this.audioContext.createMediaStreamSource(this.stream);
@@ -81,9 +81,9 @@ export class VoiceRecorder {
       if (this.animationId) cancelAnimationFrame(this.animationId);
       const mimeType = this.recorder.mimeType;
       this.recorder.onstop = () => {
-        this.cleanup();
         const blob = new Blob(this.chunks, { type: mimeType });
         const duration = (Date.now() - this.startTime) / 1000;
+        this.cleanup();
         if (duration < 1) {
           reject(new Error('Recording too short'));
           return;

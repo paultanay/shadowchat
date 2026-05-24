@@ -142,4 +142,3 @@ func (s *Server) Close() {
 		s.Nats.Close()
 	}
 }
-

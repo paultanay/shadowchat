@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrRoomIsLocked   = errors.New("room is locked")
-	ErrRoomIsFull     = errors.New("room is full")
-	ErrRoomIsExpired  = errors.New("room has expired")
-	ErrInvalidCode    = errors.New("invalid room code")
+	ErrRoomIsLocked  = errors.New("room is locked")
+	ErrRoomIsFull    = errors.New("room is full")
+	ErrRoomIsExpired = errors.New("room has expired")
+	ErrInvalidCode   = errors.New("invalid room code")
 )
 
 type RoomService struct {

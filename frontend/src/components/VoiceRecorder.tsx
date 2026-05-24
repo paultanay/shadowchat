@@ -53,29 +53,35 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
       timerRef.current = setInterval(() => {
         setElapsed((prev) => prev + 1);
       }, 1000);
+      return true;
     } catch (err: any) {
       isRecordingActive.current = false;
+      recorderRef.current = null;
       if (err.name === 'NotAllowedError') {
         alert('Microphone access denied. Please allow microphone access in your browser settings.');
       } else {
         console.error('Failed to start recording:', err);
       }
+      return false;
     }
   }, []);
 
   const stopAndSend = useCallback(async () => {
     const recorder = recorderRef.current;
-    if (!recorder) return;
+    if (!recorder) {
+      console.warn('[VoiceRecorder] stopAndSend: no recorder ref');
+      return;
+    }
     clearInterval(timerRef.current);
     try {
-      const { blob, duration } = await recorder.stop();
+      const { blob } = await recorder.stop();
       const file = new File([blob], `voice-${Date.now()}.webm`, {
         type: blob.type || 'audio/webm',
       });
       await onSendFile(file);
     } catch (err: any) {
       if (err.message !== 'Recording too short') {
-        console.error('Recording failed:', err);
+        console.error('[VoiceRecorder] stopAndSend error:', err);
       }
     } finally {
       cleanupRecording();
@@ -87,14 +93,18 @@ export default function VoiceRecorder({ onSendFile }: VoiceRecorderProps) {
     pointerStartRef.current = { x: e.clientX, y: e.clientY };
 
     if (e.pointerType === 'mouse') {
-      startRecording().then(() => setUiState('recording-bar')).catch(() => {});
+      startRecording().then((ok) => {
+        if (ok) setUiState('recording-bar');
+      });
     } else {
+      const targetEl = e.currentTarget as HTMLElement;
+      const pointerId = e.pointerId;
       holdTimerRef.current = setTimeout(async () => {
-        await startRecording();
+        const ok = await startRecording();
+        if (!ok) return;
         setUiState('recording-live');
-        const target = e.currentTarget as HTMLElement;
-        target.setPointerCapture(e.pointerId);
-        capturedPointerRef.current = e.pointerId;
+        targetEl.setPointerCapture(pointerId);
+        capturedPointerRef.current = pointerId;
       }, 200);
     }
   };

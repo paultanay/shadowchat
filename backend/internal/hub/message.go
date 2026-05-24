@@ -35,9 +35,9 @@ type SignalMessage struct {
 	Token     string          `json:"token,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`
-	Payload   string          `json:"payload,omitempty"`   // used for opaque key-exchange payloads
-	Status    string          `json:"status,omitempty"`    // online, typing, idle
-	Peers     []string        `json:"peers,omitempty"`     // active room peer IDs list
+	Payload   string          `json:"payload,omitempty"` // used for opaque key-exchange payloads
+	Status    string          `json:"status,omitempty"`  // online, typing, idle
+	Peers     []string        `json:"peers,omitempty"`   // active room peer IDs list
 	PeerCount int             `json:"peerCount,omitempty"`
 	Code      int             `json:"code,omitempty"`
 	Message   string          `json:"message,omitempty"`

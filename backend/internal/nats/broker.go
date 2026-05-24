@@ -60,4 +60,3 @@ func (b *Broker) SubscribeRoom(roomID string, handler func([]byte)) (*gonats.Sub
 		handler(msg.Data)
 	})
 }
-
