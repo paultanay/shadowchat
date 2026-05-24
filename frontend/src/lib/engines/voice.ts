@@ -20,30 +20,42 @@ export class VoiceRecorder {
   }
 
   async start(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm; codecs=opus')
-      ? 'audio/webm; codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/mp4';
+    if (this._state === 'recording') throw new Error('Already recording');
 
-    this.recorder = new MediaRecorder(this.stream, { mimeType });
-    this.chunks = [];
-    this._state = 'recording';
-    this.startTime = Date.now();
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm; codecs=opus')
+        ? 'audio/webm; codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4';
 
-    this.recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) this.chunks.push(e.data);
-    };
+      this.recorder = new MediaRecorder(this.stream, { mimeType });
+      this.chunks = [];
+      this._state = 'recording';
+      this.startTime = Date.now();
 
-    this.recorder.start(100);
+      this.recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) this.chunks.push(e.data);
+      };
 
-    this.audioContext = new AudioContext();
-    const source = this.audioContext.createMediaStreamSource(this.stream);
-    this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 64;
-    source.connect(this.analyser);
-    this.pollAmplitude();
+      this.recorder.onerror = () => {
+        console.error('[VoiceRecorder] MediaRecorder error');
+        this.cleanup();
+      };
+
+      this.recorder.start(100);
+
+      this.audioContext = new AudioContext();
+      const source = this.audioContext.createMediaStreamSource(this.stream);
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 64;
+      source.connect(this.analyser);
+      this.pollAmplitude();
+    } catch (err) {
+      this.cleanup();
+      throw err;
+    }
   }
 
   private pollAmplitude(): void {
@@ -67,9 +79,10 @@ export class VoiceRecorder {
       }
       this._state = 'stopped';
       if (this.animationId) cancelAnimationFrame(this.animationId);
+      const mimeType = this.recorder.mimeType;
       this.recorder.onstop = () => {
         this.cleanup();
-        const blob = new Blob(this.chunks, { type: this.recorder!.mimeType });
+        const blob = new Blob(this.chunks, { type: mimeType });
         const duration = (Date.now() - this.startTime) / 1000;
         if (duration < 1) {
           reject(new Error('Recording too short'));
@@ -108,7 +121,10 @@ export function computeWaveform(blob: Blob, bars: number = 40): Promise<number[]
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const buffer = await audioCtx.decodeAudioData(reader.result as ArrayBuffer);
+        if (!(reader.result instanceof ArrayBuffer)) {
+          throw new Error('Expected ArrayBuffer from FileReader');
+        }
+        const buffer = await audioCtx.decodeAudioData(reader.result);
         const channel = buffer.getChannelData(0);
         const samplesPerBar = Math.floor(channel.length / bars);
         const waveform: number[] = [];
