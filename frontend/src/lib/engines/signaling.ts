@@ -34,7 +34,7 @@ export class SignalingClient {
   private lastPongTime = Date.now();
 
   constructor(roomId: string, token: string) {
-    // Determine signaling WebSocket URL (support relative and absolute configs dynamically)
+    // Determine signaling WebSocket URL
     let wsBase = '';
     
     if (typeof window !== 'undefined') {
@@ -50,7 +50,11 @@ export class SignalingClient {
     }
     
     if (!wsBase) {
-      wsBase = process.env.NEXT_PUBLIC_WS_URL || 'wss://api.shadowchat.local/ws';
+      wsBase = process.env.NEXT_PUBLIC_SIGNALING_URL || process.env.NEXT_PUBLIC_WS_URL || '';
+    }
+    
+    if (!wsBase) {
+      throw new Error('NEXT_PUBLIC_SIGNALING_URL env var must be set for production deployment');
     }
     
     this.token = token;

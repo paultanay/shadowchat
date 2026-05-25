@@ -38,7 +38,7 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 	app.Use(recover.New())
 	app.Use(middleware.StructuredLogger(logger))
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "https://shadowchat.local, https://localhost, http://localhost, https://localhost:3000, http://localhost:3000, https://localhost:3001, http://localhost:3001, https://127.0.0.1, http://127.0.0.1",
+		AllowOrigins:     cfg.CorsOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
 		AllowCredentials: true,
@@ -72,30 +72,38 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		logger.Fatal().Err(err).Msg("Failed to connect to PostgreSQL after 5 attempts")
 	}
 
-	// Connect to Redis with retry
-	for i := 0; i < 5; i++ {
-		rdb, err = redis.Connect(cfg.RedisURL, logger)
-		if err == nil {
-			break
+	// Connect to Redis (optional — skip if no URL configured)
+	if cfg.RedisURL != "" {
+		for i := 0; i < 5; i++ {
+			rdb, err = redis.Connect(cfg.RedisURL, logger)
+			if err == nil {
+				break
+			}
+			logger.Warn().Err(err).Int("attempt", i+1).Msg("Redis connection failed, retrying...")
+			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
-		logger.Warn().Err(err).Int("attempt", i+1).Msg("Redis connection failed, retrying...")
-		time.Sleep(time.Duration(1<<i) * time.Second)
-	}
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to Redis after 5 attempts")
+		if err != nil {
+			logger.Fatal().Err(err).Msg("Failed to connect to Redis after 5 attempts")
+		}
+	} else {
+		logger.Info().Msg("Redis not configured — running without presence cache")
 	}
 
-	// Connect to NATS with retry
-	for i := 0; i < 5; i++ {
-		broker, err = nats.Connect(cfg.NatsURL, logger)
-		if err == nil {
-			break
+	// Connect to NATS (optional — skip for single-instance mode)
+	if cfg.NatsURL != "" {
+		for i := 0; i < 5; i++ {
+			broker, err = nats.Connect(cfg.NatsURL, logger)
+			if err == nil {
+				break
+			}
+			logger.Warn().Err(err).Int("attempt", i+1).Msg("NATS connection failed, retrying...")
+			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
-		logger.Warn().Err(err).Int("attempt", i+1).Msg("NATS connection failed, retrying...")
-		time.Sleep(time.Duration(1<<i) * time.Second)
-	}
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to NATS after 5 attempts")
+		if err != nil {
+			logger.Fatal().Err(err).Msg("Failed to connect to NATS after 5 attempts")
+		}
+	} else {
+		logger.Info().Msg("NATS not configured — running in single-instance mode")
 	}
 
 	// Instantiate Repo & Service Layers
