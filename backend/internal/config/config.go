@@ -5,14 +5,14 @@ import (
 )
 
 type Config struct {
-	Port         string
-	RedisURL     string
-	NatsURL      string
-	DatabaseURL  string
-	TurnSecret   string
-	JwtSecret    string
-	Env          string
-	CorsOrigins  string
+	Port        string
+	RedisURL    string
+	NatsURL     string
+	DatabaseURL string
+	TurnSecret  string
+	JwtSecret   string
+	Env         string
+	CorsOrigins string
 }
 
 func Load() *Config {
