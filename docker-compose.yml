@@ -105,7 +105,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_WS_URL: wss://api.shadowchat.local/ws
+        NEXT_PUBLIC_SIGNALING_URL: wss://api.shadowchat.local/ws
         NEXT_PUBLIC_API_URL: https://api.shadowchat.local/api/v1
     restart: unless-stopped
     ports:

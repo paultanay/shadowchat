@@ -29,7 +29,7 @@ backend/*.log
 backend/coverage.txt
 backend/profile.out
 
-# ─── Frontend Next.js ───
+# ─── Frontend Next.js / Vercel ───
 frontend/node_modules/
 frontend/.next/
 frontend/out/
@@ -41,6 +41,7 @@ frontend/yarn-error.log*
 frontend/.pnp*
 frontend/.eslintcache
 frontend/tsconfig.tsbuildinfo
+frontend/.vercel
 
 # ─── Infrastructure and Secrets ───
 .env

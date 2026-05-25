@@ -1,11 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/paultanay/shadowchat/main/frontend/public/logo.png" width="80" height="80" alt="ShadowChat Logo" />
+  <img src="frontend/public/banner.png" alt="ShadowChat Logo" />
 </p>
 
-<h1 align="center">🜏 ShadowChat</h1>
-
 <p align="center">
-  <strong>Enterprise-Grade, Zero-Knowledge, Peer-to-Peer File Transfer and Communication Platform</strong>
+  <strong>Zero-Knowledge, Peer-to-Peer File Transfer and Communication Platform</strong>
 </p>
 
 <p align="center">
