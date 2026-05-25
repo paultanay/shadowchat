@@ -3,10 +3,7 @@ import { SignalingClient } from '@/lib/engines/signaling';
 import { PeerConnectionManager } from '@/lib/engines/webrtc';
 import { 
   generateX25519KeyPair, 
-  generateEd25519KeyPair, 
-  exportKeyToJwk, 
-  importX25519PublicKey, 
-  importEd25519PublicKey 
+  generateEd25519KeyPair 
 } from '@/lib/crypto/keys';
 import { 
   prepareKeyExchange, 
@@ -30,14 +27,14 @@ const getApiBase = () => {
   if (typeof window !== 'undefined') {
     const host = window.location.host;
     const protocol = window.location.protocol;
-    if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('shadowchat.local')) {
+    if (host.includes('localhost') || host.includes('127.0.0.1')) {
       if (host.includes(':3000') || host.includes(':3001')) {
         return `${protocol}//${window.location.hostname}:8080/api/v1`;
       }
       return `${protocol}//${host}/api/v1`;
     }
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1';
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
 };
 
 export interface Peer {
@@ -337,8 +334,8 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 coordinator.handleChannelMessage(label, data);
               }
             }
-          } catch (err) {
-            // ignore parse errors
+          } catch {
+            console.warn('[roomStore] Failed to parse signaling message');
           }
         }
       }

@@ -75,7 +75,8 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
               onClose();
               return;
             }
-          } catch {
+          } catch (err) {
+            console.warn('[QRScanner] Failed to parse URL:', err);
             if (resultUrl && resultUrl.length >= 6 && resultUrl.length <= 40) {
               stopCamera();
               onScanSuccess(resultUrl.trim());

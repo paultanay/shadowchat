@@ -34,13 +34,12 @@ export class SignalingClient {
   private lastPongTime = Date.now();
 
   constructor(roomId: string, token: string) {
-    // Determine signaling WebSocket URL
     let wsBase = '';
     
     if (typeof window !== 'undefined') {
       const host = window.location.host;
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('shadowchat.local')) {
+      if (host.includes('localhost') || host.includes('127.0.0.1')) {
         if (host.includes(':3000') || host.includes(':3001')) {
           wsBase = `${wsProtocol}//${window.location.hostname}:8080/ws`;
         } else {
@@ -50,7 +49,7 @@ export class SignalingClient {
     }
     
     if (!wsBase) {
-      wsBase = process.env.NEXT_PUBLIC_SIGNALING_URL || process.env.NEXT_PUBLIC_WS_URL || '';
+      wsBase = process.env.NEXT_PUBLIC_SIGNALING_URL || '';
     }
     
     if (!wsBase) {

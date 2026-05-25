@@ -47,19 +47,6 @@ export async function importX25519PublicKey(jwk: JsonWebKey): Promise<CryptoKey>
   );
 }
 
-// Import an X25519 Private Key from JWK
-export async function importX25519PrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
-  return await window.crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    {
-      name: 'X25519',
-    },
-    true,
-    ['deriveKey', 'deriveBits']
-  );
-}
-
 // Import an Ed25519 Public Key from JWK
 export async function importEd25519PublicKey(jwk: JsonWebKey): Promise<CryptoKey> {
   return await window.crypto.subtle.importKey(
@@ -70,19 +57,6 @@ export async function importEd25519PublicKey(jwk: JsonWebKey): Promise<CryptoKey
     },
     true,
     ['verify']
-  );
-}
-
-// Import an Ed25519 Private Key from JWK
-export async function importEd25519PrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
-  return await window.crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    {
-      name: 'Ed25519',
-    },
-    true,
-    ['sign']
   );
 }
 

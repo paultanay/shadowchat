@@ -35,29 +35,4 @@ export async function deriveRoomKey(
   );
 }
 
-// Derive arbitrary length bits using HKDF-SHA-256
-export async function deriveBitsHKDF(
-  ikm: ArrayBuffer,
-  salt: Uint8Array,
-  info: Uint8Array,
-  bitLength: number
-): Promise<ArrayBuffer> {
-  const baseKey = await window.crypto.subtle.importKey(
-    'raw',
-    ikm,
-    { name: 'HKDF' },
-    false,
-    ['deriveBits']
-  );
 
-  return await window.crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: salt as Uint8Array<ArrayBuffer>,
-      info: info as Uint8Array<ArrayBuffer>,
-    },
-    baseKey,
-    bitLength
-  );
-}

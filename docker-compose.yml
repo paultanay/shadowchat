@@ -59,8 +59,9 @@ services:
         limits:
           memory: 256M
 
-  # ─── Coturn STUN/TURN Server ───
+  # ─── Coturn STUN/TURN Server (optional — enable with: docker compose --profile turn up) ───
   coturn:
+    profiles: ["turn"]
     image: coturn/coturn:latest
     ports:
       - "3478:3478"
@@ -86,6 +87,7 @@ services:
       - NATS_URL=nats://nats:4222
       - DATABASE_URL=postgres://shadow:shadowsecret@postgres:5432/shadowchat?sslmode=disable
       - TURN_SECRET=shadowchatdevsecretkey1234567890
+      - TURN_URLS=turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp,turns:localhost:5349?transport=tcp
       - JWT_SECRET=shadowchatdevjwtsecretkey9876543210
     depends_on:
       postgres:
@@ -105,8 +107,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_SIGNALING_URL: wss://api.shadowchat.local/ws
-        NEXT_PUBLIC_API_URL: https://api.shadowchat.local/api/v1
+        NEXT_PUBLIC_SIGNALING_URL: ws://localhost:8080/ws
+        NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -117,8 +119,9 @@ services:
         limits:
           memory: 256M
 
-  # ─── Nginx Reverse Proxy (TLS Termination) ───
+  # ─── Nginx Reverse Proxy (optional — enable with: docker compose --profile reverse-proxy up) ───
   nginx:
+    profiles: ["reverse-proxy"]
     image: nginx:alpine
     restart: unless-stopped
     ports:

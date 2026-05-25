@@ -64,26 +64,6 @@ export async function saveRoom(room: StoredRoom): Promise<void> {
   await db.rooms.put(room);
 }
 
-export async function getRoom(id: string): Promise<StoredRoom | undefined> {
-  return await db.rooms.get(id);
-}
-
-export async function getAllRooms(): Promise<StoredRoom[]> {
-  return await db.rooms.orderBy('joinedAt').reverse().toArray();
-}
-
-export async function deleteRoom(id: string): Promise<void> {
-  await db.transaction('rw', [db.rooms, db.files, db.messages, db.chunks], async () => {
-    await db.rooms.delete(id);
-    const files = await db.files.where('roomId').equals(id).toArray();
-    for (const file of files) {
-      await db.chunks.where('transferId').equals(file.id).delete();
-    }
-    await db.files.where('roomId').equals(id).delete();
-    await db.messages.where('roomId').equals(id).delete();
-  });
-}
-
 export async function saveFileMeta(file: StoredFileMeta): Promise<void> {
   await db.files.put(file);
 }

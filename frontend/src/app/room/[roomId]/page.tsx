@@ -70,14 +70,11 @@ export default function RoomPage({ params }: PageProps) {
 
   const {
     sidebarOpen,
-    notifications,
     toggleSidebar,
     showToast,
-    dismissToast,
   } = useUIStore();
 
   const [inputText, setInputText] = useState("");
-  const [isCopied, setIsCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -123,10 +120,10 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
           
           if (roomId.length === 36) {
             const apiBase = typeof window !== 'undefined'
-              ? (window.location.host.includes('localhost') || window.location.host.includes('127.0.0.1') || window.location.host.includes('shadowchat.local')
+              ? (window.location.host.includes('localhost') || window.location.host.includes('127.0.0.1')
                 ? `${window.location.protocol}//${(window.location.host.includes(':3000') || window.location.host.includes(':3001')) ? window.location.hostname + ':8080' : window.location.host}/api/v1`
-                : process.env.NEXT_PUBLIC_API_URL || 'https://api.shadowchat.local/api/v1')
-              : 'https://api.shadowchat.local/api/v1';
+                : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1')
+              : 'http://localhost:8080/api/v1';
 
             const res = await fetch(`${apiBase}/rooms/${roomId}`);
             if (res.ok) {
@@ -195,15 +192,13 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const handleCopyLink = () => {
     const link = `${window.location.origin}/room/${roomCode || roomId}${window.location.hash || ""}`;
     navigator.clipboard.writeText(link).catch(() => {
-      // Fallback: could use a hidden textarea approach
+      console.warn('[Room] Failed to copy link to clipboard');
     });
-    setIsCopied(true);
     showToast({
       type: "success",
       title: "Link Copied",
       message: "Room invitation URL copied to clipboard.",
     });
-    setTimeout(() => setIsCopied(false), 2000);
   };
 
   const handleSendChat = (e: React.FormEvent) => {
@@ -371,10 +366,6 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   };
 
   const activePeerList = Array.from(peers.values());
-  const activeTransferList = Array.from(activeTransfers.entries()).map(([tid, details]) => ({
-    id: tid,
-    ...details,
-  }));
 
   const getInviteUrl = () => {
     if (typeof window === "undefined") return "";

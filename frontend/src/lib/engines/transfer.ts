@@ -333,7 +333,7 @@ export class FileTransferCoordinator {
         }
       }
     } catch (err) {
-      // ignore JSON parse errors
+      console.warn('[Transfer] Failed to parse control message:', err);
     }
   }
 

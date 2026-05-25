@@ -26,6 +26,11 @@ func main() {
 	cfg := config.Load()
 	logger.Info().Str("env", cfg.Env).Str("port", cfg.Port).Msg("Configuration loaded")
 
+	// Validate configuration
+	for _, warn := range cfg.Validate() {
+		logger.Warn().Msg(warn)
+	}
+
 	// Initialize server
 	srv := server.New(cfg, logger)
 	defer srv.Close()

@@ -79,7 +79,7 @@ func WSHandler(h *hub.Hub, cfg *config.Config, roomService *service.RoomService,
 
 		if err := roomService.ValidateAccess(context.Background(), roomID); err != nil {
 			logger.Warn().Err(err).Str("room_id", roomID).Msg("WS auth: access validation failed")
-			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"`+err.Error()+`"}`))
+			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"access denied"}`))
 			return
 		}
 

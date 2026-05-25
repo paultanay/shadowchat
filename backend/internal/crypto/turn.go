@@ -16,7 +16,7 @@ type TurnCredentials struct {
 }
 
 // GenerateTurnCredentials creates dynamic TURN credentials according to the TURN REST API spec
-func GenerateTurnCredentials(turnSecret string, peerID string, ttl time.Duration) TurnCredentials {
+func GenerateTurnCredentials(turnSecret string, peerID string, ttl time.Duration, turnURLs []string) TurnCredentials {
 	expiryTime := time.Now().Add(ttl).Unix()
 	username := fmt.Sprintf("%d:%s", expiryTime, peerID)
 
@@ -24,14 +24,18 @@ func GenerateTurnCredentials(turnSecret string, peerID string, ttl time.Duration
 	mac.Write([]byte(username))
 	password := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
+	if len(turnURLs) == 0 {
+		turnURLs = []string{
+			"turn:localhost:3478?transport=udp",
+			"turn:localhost:3478?transport=tcp",
+			"turns:localhost:5349?transport=tcp",
+		}
+	}
+
 	return TurnCredentials{
 		Username: username,
 		Password: password,
 		TTL:      int(ttl.Seconds()),
-		URLs: []string{
-			"turn:shadowchat.local:3478?transport=udp",
-			"turn:shadowchat.local:3478?transport=tcp",
-			"turns:shadowchat.local:5349?transport=tcp",
-		},
+		URLs:     turnURLs,
 	}
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,10 +18,15 @@ func NewTurnHandler(cfg *config.Config) *TurnHandler {
 }
 
 func (h *TurnHandler) GetCredentials(c *fiber.Ctx) error {
-	claims := c.Locals("room_claims").(*crypto.RoomClaims)
+	claims, ok := c.Locals("room_claims").(*crypto.RoomClaims)
+	if !ok || claims == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
 
-	// Issue credentials valid for 24 hours
-	creds := crypto.GenerateTurnCredentials(h.cfg.TurnSecret, claims.PeerID, 24*time.Hour)
+	turnURLs := strings.Split(h.cfg.TurnURLs, ",")
+	creds := crypto.GenerateTurnCredentials(h.cfg.TurnSecret, claims.PeerID, 24*time.Hour, turnURLs)
 
 	return c.Status(fiber.StatusOK).JSON(creds)
 }
