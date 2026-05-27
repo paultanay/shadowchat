@@ -8,6 +8,24 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const migrationSQL = `
+CREATE TABLE IF NOT EXISTS rooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    encrypted_name BYTEA,
+    encrypted_config BYTEA,
+    room_code VARCHAR(16) UNIQUE NOT NULL,
+    max_members INT DEFAULT 10,
+    is_locked BOOLEAN DEFAULT FALSE,
+    is_temporary BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,
+    owner_id UUID,
+    member_count INT DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms(room_code);
+CREATE INDEX IF NOT EXISTS idx_rooms_expiry ON rooms(expires_at) WHERE expires_at IS NOT NULL;
+`
+
 type DB struct {
 	Pool *pgxpool.Pool
 }
@@ -38,6 +56,14 @@ func ConnectDB(databaseURL string, logger zerolog.Logger) (*DB, error) {
 	}
 
 	logger.Info().Msg("PostgreSQL database connection pool established")
+
+	// Run migrations
+	if _, err := pool.Exec(ctx, migrationSQL); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	logger.Info().Msg("Database migrations applied successfully")
+
 	return &DB{Pool: pool}, nil
 }
 
