@@ -37,11 +37,12 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 	// Add basic middlewares
 	app.Use(recover.New())
 	app.Use(middleware.StructuredLogger(logger))
+	allowCreds := cfg.CorsOrigins != "*"
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CorsOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
-		AllowCredentials: true,
+		AllowCredentials: allowCreds,
 	}))
 
 	// Security Headers Middleware
