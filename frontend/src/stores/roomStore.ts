@@ -203,14 +203,19 @@ export const useRoomStore = create<RoomState>((set, get) => {
       clearTimeout(turnTimeout);
       if (turnRes.ok) {
         const turnData = await turnRes.json();
-        iceServers = [
-          { urls: 'stun:stun.l.google.com:19302' },
-          {
-            urls: turnData.urls || [],
-            username: turnData.username,
-            credential: turnData.credential || turnData.password,
-          }
-        ];
+        const validUrls = (turnData.urls || []).filter(
+          (u: string) => !u.includes('localhost') && !u.includes('127.0.0.1')
+        );
+        if (validUrls.length > 0) {
+          iceServers = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            {
+              urls: validUrls,
+              username: turnData.username,
+              credential: turnData.credential || turnData.password,
+            }
+          ];
+        }
       }
     } catch (err) {
       console.warn("Failed to gather TURN credentials, falling back to public STUN:", err);
