@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,7 @@ type Client struct {
 	Send   chan []byte
 	Hub    *Hub
 	closed atomic.Bool
+	closeOnce sync.Once
 	logger zerolog.Logger
 }
 
@@ -47,7 +49,7 @@ func NewClient(id string, roomID string, conn *websocket.Conn, hub *Hub, logger 
 func (c *Client) ReadPump() {
 	defer func() {
 		c.Hub.Unregister <- c
-		c.Conn.Close()
+		c.closeOnce.Do(func() { c.Conn.Close() })
 	}()
 
 	c.Conn.SetReadLimit(maxMessageSize)
@@ -87,7 +89,7 @@ func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.Conn.Close()
+		c.closeOnce.Do(func() { c.Conn.Close() })
 	}()
 
 	for {
@@ -128,6 +130,11 @@ func (c *Client) WritePump() {
 }
 
 func (c *Client) SendJSON(msg *SignalMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Warn().Interface("recover", r).Msg("SendJSON recovered from panic (closed channel)")
+		}
+	}()
 	if c.closed.Load() {
 		return
 	}

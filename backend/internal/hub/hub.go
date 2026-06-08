@@ -277,9 +277,50 @@ func (h *Hub) handleBroadcast(ctx context.Context, msg *SignalMessage) {
 			client, exists := lr.Clients[msg.FromID]
 			lr.mu.RUnlock()
 			if exists {
-				client.SendJSON(&SignalMessage{Type: TypePong})
+				client.SendJSON(&SignalMessage{Type: TypePong, RoomID: msg.RoomID})
 			}
 		}
+		return
+	}
+
+	// Auth messages: client sends {type:"auth", token:"..."} after WS upgrade.
+	// Token is already validated at upgrade time via WSAuthMiddleware,
+	// so here we just acknowledge and emit room-state to the client.
+	if msg.Type == TypeAuth {
+		val, ok := h.rooms.Load(msg.RoomID)
+		if ok {
+			lr := val.(*LocalRoom)
+			lr.mu.RLock()
+			client, exists := lr.Clients[msg.FromID]
+			// Build peer list excluding current client
+			var peersList []string
+			for pID := range lr.Clients {
+				if pID != msg.FromID {
+					peersList = append(peersList, pID)
+				}
+			}
+			lr.mu.RUnlock()
+			if exists {
+				// 1. Send auth acknowledgement so frontend triggers 'connect' event
+				client.SendJSON(&SignalMessage{
+					Type:    TypeAuth,
+					Success: true,
+					RoomID:  msg.RoomID,
+				})
+				// 2. Send current room state
+				client.SendJSON(&SignalMessage{
+					Type:      TypeRoomState,
+					RoomID:    msg.RoomID,
+					Peers:     peersList,
+					PeerCount: len(peersList) + 1,
+				})
+			}
+		}
+		return
+	}
+
+	// Filter out client-to-server command types — do not relay to peers
+	if msg.Type == TypeJoin || msg.Type == TypeLeave {
 		return
 	}
 
@@ -295,11 +336,21 @@ func (h *Hub) handleBroadcast(ctx context.Context, msg *SignalMessage) {
 	if ok {
 		lr := val.(*LocalRoom)
 		lr.mu.RLock()
-		for _, client := range lr.Clients {
-			if client.ID != msg.FromID {
-				client.SendJSON(msg)
+
+		if msg.TargetID != "" {
+			// Route to specific peer only (WebRTC offer/answer/ICE/key-exchange)
+			if target, exists := lr.Clients[msg.TargetID]; exists {
+				target.SendJSON(msg)
+			}
+		} else {
+			// Broadcast to all local peers except sender
+			for _, client := range lr.Clients {
+				if client.ID != msg.FromID {
+					client.SendJSON(msg)
+				}
 			}
 		}
+
 		lr.mu.RUnlock()
 	}
 

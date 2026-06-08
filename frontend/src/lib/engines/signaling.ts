@@ -57,54 +57,77 @@ export class SignalingClient {
     }
     
     this.token = token;
-    this.url = `${wsBase}?room=${roomId}`;
+    this.url = `${wsBase}?room=${roomId}&token=${encodeURIComponent(token)}`;
   }
 
-  public connect(): void {
-    if (this.socket) return;
-    this.isDisconnecting = false;
+  public connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.socket) { resolve(); return; }
+      this.isDisconnecting = false;
 
-    try {
-      this.socket = new WebSocket(this.url);
-      this.socket.binaryType = 'arraybuffer';
+      try {
+        this.socket = new WebSocket(this.url);
+        this.socket.binaryType = 'arraybuffer';
 
-      this.socket.onopen = () => {
-        this.lastPongTime = Date.now();
-        this.socket!.send(JSON.stringify({ type: 'auth', token: this.token }));
-      };
+        const onAuthResolve = () => {
+          this.off('connect', onAuthResolve);
+          this.off('error', onAuthReject);
+          resolve();
+        };
+        const onAuthReject = () => {
+          this.off('connect', onAuthResolve);
+          this.off('error', onAuthReject);
+          reject(new Error('WebSocket connection failed'));
+        };
+        this.on('connect', onAuthResolve);
+        this.on('error', onAuthReject);
 
-      this.socket.onclose = () => {
-        this.stopHeartbeat();
+        this.socket.onopen = () => {
+          this.lastPongTime = Date.now();
+          this.socket!.send(JSON.stringify({ type: 'auth', token: this.token }));
+        };
+
+        this.socket.onclose = () => {
+          this.stopHeartbeat();
+          this.socket = null;
+          this.trigger('disconnect', undefined);
+          this.scheduleReconnect();
+        };
+
+        this.socket.onerror = (event) => {
+          console.error('[Signaling] WebSocket error', event);
+        };
+
+        this.socket.onmessage = (event) => {
+          const lines = event.data.split('\n').filter(Boolean);
+          for (const line of lines) {
+            let data: any;
+            try {
+              data = JSON.parse(line);
+            } catch (err) {
+              console.error('[Signaling] Invalid JSON line:', line, err);
+              continue;
+            }
+            try {
+              this.handleMessage(data);
+            } catch (err) {
+              console.error('[Signaling] Handler error:', data, err);
+            }
+          }
+        };
+
+        // Reject after timeout if auth never arrives
+        setTimeout(() => {
+          this.off('connect', onAuthResolve);
+          this.off('error', onAuthReject);
+          reject(new Error('WebSocket auth timeout'));
+        }, 10000);
+      } catch (err) {
+        console.error('[Signaling] Connection failed:', err);
         this.socket = null;
-        this.trigger('disconnect', undefined);
-        this.scheduleReconnect();
-      };
-
-      this.socket.onerror = (event) => {
-        console.error('[Signaling] WebSocket error', event);
-      };
-
-      this.socket.onmessage = (event) => {
-        const lines = event.data.split('\n').filter(Boolean);
-        for (const line of lines) {
-          let data: any;
-          try {
-            data = JSON.parse(line);
-          } catch (err) {
-            console.error('[Signaling] Invalid JSON line:', line, err);
-            continue;
-          }
-          try {
-            this.handleMessage(data);
-          } catch (err) {
-            console.error('[Signaling] Handler error:', data, err);
-          }
-        }
-      };
-    } catch (err) {
-      console.error('[Signaling] Connection failed:', err);
-      this.socket = null;
-    }
+        reject(err);
+      }
+    });
   }
 
   public disconnect(): void {

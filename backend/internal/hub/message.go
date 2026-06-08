@@ -16,13 +16,14 @@ const (
 	TypeJoin  MessageType = "join"
 	TypeLeave MessageType = "leave"
 	TypePing  MessageType = "ping"
+	TypeAuth  MessageType = "auth" // client sends auth token; server responds with auth ack
 
 	// Server -> Client notifications
-	TypePeerJoined    MessageType = "peer-joined"
-	TypePeerLeft      MessageType = "peer-left"
-	TypeRoomState     MessageType = "room-state"
-	TypePong          MessageType = "pong"
-	TypeError         MessageType = "error"
+	TypePeerJoined     MessageType = "peer-joined"
+	TypePeerLeft       MessageType = "peer-left"
+	TypeRoomState      MessageType = "room-state"
+	TypePong           MessageType = "pong"
+	TypeError          MessageType = "error"
 	TypeServerShutdown MessageType = "server-shutdown"
 )
 
@@ -42,6 +43,8 @@ type SignalMessage struct {
 	PeerCount int             `json:"peerCount,omitempty"`
 	Code      int             `json:"code,omitempty"`
 	Message   string          `json:"message,omitempty"`
+	Success   bool            `json:"success,omitempty"` // used for auth ack
+	Error     string          `json:"error,omitempty"`   // used for auth failure reason
 }
 
 func (m *SignalMessage) Serialize() ([]byte, error) {

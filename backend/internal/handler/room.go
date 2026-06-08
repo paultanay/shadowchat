@@ -106,6 +106,7 @@ func (h *RoomHandler) Create(c *fiber.Ctx) error {
 		MaxMembers:      req.MaxMembers,
 		IsTemporary:     req.IsTemporary,
 		Lifetime:        lifetime,
+		OwnerID:         &req.PeerID,
 	})
 
 	if err != nil {

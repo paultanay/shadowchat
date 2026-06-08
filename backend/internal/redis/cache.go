@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,7 +16,10 @@ type Cache struct {
 }
 
 func Connect(redisURL string, logger zerolog.Logger) (*Cache, error) {
-	opts, err := redis.ParseURL("redis://" + redisURL)
+	if !strings.HasPrefix(redisURL, "redis://") && !strings.HasPrefix(redisURL, "rediss://") {
+		redisURL = "redis://" + redisURL
+	}
+	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
 		// Fallback to parsing as direct addr if it fails
 		opts = &redis.Options{

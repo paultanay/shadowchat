@@ -43,6 +43,15 @@ export class PeerConnectionManager {
     this.events = events;
   }
 
+  private async waitForIceGathering(): Promise<void> {
+    if (!this.pc || this.pc.iceGatheringState === 'complete') return;
+    await new Promise<void>((resolve) => {
+      this.pc!.onicegatheringstatechange = () => {
+        if (this.pc!.iceGatheringState === 'complete') resolve();
+      };
+    });
+  }
+
   public async initialize(): Promise<void> {
     const config: RTCConfiguration = {
       iceServers: this.iceServers,
@@ -67,28 +76,6 @@ export class PeerConnectionManager {
       this.events.onStateChange(state);
     };
 
-    this.pc.onnegotiationneeded = async () => {
-      if (!this.pc || this.pendingOffer || this.restartCount >= this.MAX_RESTARTS) return;
-      this.pendingOffer = true;
-      try {
-        const offer = await this.pc.createOffer();
-        await this.pc.setLocalDescription(offer);
-        if (this.pc.iceGatheringState !== 'complete') {
-          await new Promise<void>((resolve) => {
-            this.pc!.onicegatheringstatechange = () => {
-              if (this.pc!.iceGatheringState === 'complete') resolve();
-            };
-          });
-        }
-        this.signaling.send('offer', this.roomId, this.peerId, {
-          sdp: offer.sdp,
-        });
-        this.restartCount++;
-      } finally {
-        this.pendingOffer = false;
-      }
-    };
-
     if (this.isInitiator) {
       // 1. Create Control channel (reliable + ordered)
       this.setupControlChannel(this.pc.createDataChannel('control', { ordered: true }));
@@ -104,13 +91,7 @@ export class PeerConnectionManager {
       // 3. Initiate SDP offer after ICE gathering completes
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
-      if (this.pc.iceGatheringState !== 'complete') {
-        await new Promise<void>((resolve) => {
-          this.pc!.onicegatheringstatechange = () => {
-            if (this.pc!.iceGatheringState === 'complete') resolve();
-          };
-        });
-      }
+      await this.waitForIceGathering();
       this.signaling.send('offer', this.roomId, this.peerId, {
         sdp: offer.sdp,
       });
@@ -125,6 +106,23 @@ export class PeerConnectionManager {
         }
       };
     }
+
+    // Set onnegotiationneeded AFTER initialize() completes to prevent race
+    this.pc.onnegotiationneeded = async () => {
+      if (!this.pc || this.pendingOffer || this.restartCount >= this.MAX_RESTARTS) return;
+      this.pendingOffer = true;
+      try {
+        const offer = await this.pc.createOffer();
+        await this.pc.setLocalDescription(offer);
+        await this.waitForIceGathering();
+        this.signaling.send('offer', this.roomId, this.peerId, {
+          sdp: offer.sdp,
+        });
+        this.restartCount++;
+      } finally {
+        this.pendingOffer = false;
+      }
+    };
   }
 
   public async handleOffer(sdp: string): Promise<void> {

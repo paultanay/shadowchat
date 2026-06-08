@@ -324,7 +324,7 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
       return;
     }
 
-    peers.forEach(async (peer) => {
+    for (const [, peer] of peers) {
       if (peer.status === 'connected') {
         try {
           showToast({
@@ -341,7 +341,7 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
           });
         }
       }
-    });
+    }
   };
 
   const formatBytes = (bytes: number): string => {

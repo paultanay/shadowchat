@@ -86,9 +86,9 @@ services:
       - REDIS_URL=redis:6379
       - NATS_URL=nats://nats:4222
       - DATABASE_URL=postgres://shadow:${POSTGRES_PASSWORD:-shadowsecret}@postgres:5432/shadowchat?sslmode=disable
-      - TURN_SECRET=${TURN_SECRET:?TURN_SECRET is required}
-      - TURN_URLS=turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp,turns:localhost:5349?transport=tcp
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-in-production}
+      - TURN_URLS=${TURN_URLS:-turn:coturn:3478?transport=udp,turn:coturn:3478?transport=tcp,turns:coturn:5349?transport=tcp}
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
     depends_on:
       postgres:
         condition: service_healthy
