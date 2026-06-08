@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { AlertTriangle, Shield, X } from "lucide-react";
 
@@ -38,6 +39,23 @@ export default function ConfirmDialog({
   variant = 'default',
 }: ConfirmDialogProps) {
   const styles = variantStyles[variant];
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  const handleDialogKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { onCancel(); return; }
+    if (e.key !== 'Tab') return;
+    const buttons = dialogRef.current?.querySelectorAll('button');
+    if (!buttons || buttons.length < 2) return;
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -47,8 +65,7 @@ export default function ConfirmDialog({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
-        >
+          >
           <motion.div
             className="absolute inset-0 bg-black/75 backdrop-blur-xs"
             initial={{ opacity: 0 }}
@@ -58,6 +75,7 @@ export default function ConfirmDialog({
           />
 
           <motion.div
+            ref={dialogRef}
             className="relative sc-glass rounded-3xl p-6 max-w-sm w-full space-y-5 border border-border-glass shadow-elegant"
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -66,6 +84,7 @@ export default function ConfirmDialog({
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-dialog-title"
+            onKeyDown={handleDialogKeyDown}
           >
             <button
               onClick={onCancel}
@@ -89,6 +108,7 @@ export default function ConfirmDialog({
 
             <div className="flex items-center gap-3">
               <button
+                autoFocus
                 onClick={onCancel}
                 className="flex-1 py-2.5 px-4 bg-bg-tertiary hover:bg-bg-secondary border border-border-glass rounded-xl text-xs font-mono font-bold text-text-primary transition-all cursor-pointer"
               >

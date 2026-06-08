@@ -18,11 +18,12 @@ const (
 	TypePing  MessageType = "ping"
 
 	// Server -> Client notifications
-	TypePeerJoined MessageType = "peer-joined"
-	TypePeerLeft   MessageType = "peer-left"
-	TypeRoomState  MessageType = "room-state"
-	TypePong       MessageType = "pong"
-	TypeError      MessageType = "error"
+	TypePeerJoined    MessageType = "peer-joined"
+	TypePeerLeft      MessageType = "peer-left"
+	TypeRoomState     MessageType = "room-state"
+	TypePong          MessageType = "pong"
+	TypeError         MessageType = "error"
+	TypeServerShutdown MessageType = "server-shutdown"
 )
 
 // SignalMessage is the unified envelope for all signaling protocol packets

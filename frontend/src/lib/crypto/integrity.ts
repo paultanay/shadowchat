@@ -1,8 +1,4 @@
-/**
- * Incremental file hash coordinator using background Web Workers.
- */
-
-export async function calculateFileHash(
+export async function computeHash(
   file: File | Blob,
   onProgress?: (progress: number) => void
 ): Promise<string> {
@@ -12,13 +8,11 @@ export async function calculateFileHash(
       { type: 'module' }
     );
 
-    worker.addEventListener('message', (event: MessageEvent) => {
+    worker.onmessage = (event: MessageEvent) => {
       const { type, hash, progress, error } = event.data;
 
       if (type === 'progress') {
-        if (onProgress) {
-          onProgress(progress);
-        }
+        onProgress?.(progress);
       } else if (type === 'success') {
         resolve(hash);
         worker.terminate();
@@ -26,16 +20,15 @@ export async function calculateFileHash(
         reject(new Error(error));
         worker.terminate();
       }
-    });
+    };
 
-    worker.addEventListener('error', (err) => {
+    worker.onerror = (err) => {
       reject(err);
       worker.terminate();
-    });
+    };
 
-    worker.postMessage({
-      type: 'hash-file',
-      file,
-    });
+    worker.postMessage({ type: 'hash-file', file });
   });
 }
+
+export { computeHash as calculateFileHash };

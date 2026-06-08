@@ -12,6 +12,7 @@ export class VoiceRecorder {
   private startTime: number = 0;
   private _state: 'idle' | 'recording' | 'stopped' = 'idle';
   private options: VoiceRecorderOptions;
+  private stopReject: ((err: Error) => void) | null = null;
 
   get state() { return this._state; }
 
@@ -41,6 +42,7 @@ export class VoiceRecorder {
 
       this.recorder.onerror = () => {
         console.error('[VoiceRecorder] MediaRecorder error');
+        this.stopReject?.(new Error('MediaRecorder error'));
         this.cleanup();
       };
 
@@ -79,6 +81,7 @@ export class VoiceRecorder {
       }
       this._state = 'stopped';
       if (this.animationId) cancelAnimationFrame(this.animationId);
+      this.stopReject = reject;
       const mimeType = this.recorder.mimeType;
       this.recorder.onstop = () => {
         const blob = new Blob(this.chunks, { type: mimeType });

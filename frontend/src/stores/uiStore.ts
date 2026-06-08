@@ -8,6 +8,8 @@ export interface ToastNotification {
   durationMs?: number;
 }
 
+const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
 interface UIState {
   theme: 'dark' | 'light' | 'system';
   sidebarOpen: boolean;
@@ -42,16 +44,25 @@ export const useUIStore = create<UIState>((set) => ({
     }));
 
     if (duration > 0) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        toastTimeouts.delete(id);
         set((state) => ({
           notifications: state.notifications.filter((n) => n.id !== id),
         }));
       }, duration);
+      toastTimeouts.set(id, timer);
     }
   },
 
-  dismissToast: (id) => set((state) => ({
-    notifications: state.notifications.filter((n) => n.id !== id),
-  })),
+  dismissToast: (id) => {
+    const timer = toastTimeouts.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimeouts.delete(id);
+    }
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
+    }));
+  },
   setPageLeaving: (leaving) => set({ pageLeaving: leaving }),
 }));

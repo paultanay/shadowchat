@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/paultanay/shadowchat/internal/config"
@@ -10,6 +12,21 @@ import (
 	"github.com/paultanay/shadowchat/internal/service"
 	"github.com/rs/zerolog"
 )
+
+func validatePeerID(peerID string) error {
+	if peerID == "" {
+		return fmt.Errorf("peer_id is required")
+	}
+	if len(peerID) > 64 {
+		return fmt.Errorf("peer_id must not exceed 64 characters")
+	}
+	for _, c := range peerID {
+		if !unicode.IsPrint(c) {
+			return fmt.Errorf("peer_id contains non-printable characters")
+		}
+	}
+	return nil
+}
 
 type RoomHandler struct {
 	roomService *service.RoomService
@@ -73,11 +90,13 @@ func (h *RoomHandler) Create(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.PeerID == "" {
+	if err := validatePeerID(req.PeerID); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "initiator peer_id is required",
+			"error": err.Error(),
 		})
 	}
+
+	// TODO: Add rate limiting here using cache.RateLimit(key, limit, window) when Redis is available
 
 	lifetime := time.Duration(req.LifetimeHours) * time.Hour
 	room, err := h.roomService.CreateRoom(c.Context(), service.CreateRoomParams{
@@ -129,11 +148,18 @@ func (h *RoomHandler) Join(c *fiber.Ctx) error {
 		})
 	}
 
-	if req.RoomCode == "" || req.PeerID == "" {
+	if req.RoomCode == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "room_code and peer_id are required",
+			"error": "room_code is required",
 		})
 	}
+	if err := validatePeerID(req.PeerID); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// TODO: Add rate limiting here using cache.RateLimit(key, limit, window) when Redis is available
 
 	room, err := h.roomService.GetRoomByCode(c.Context(), strings.ToUpper(req.RoomCode))
 	if err != nil {

@@ -12,7 +12,7 @@ import {
   decryptText
 } from './crypto';
 import { encryptAESGCM, decryptAESGCM } from '../crypto/aes';
-import { calculateFileHash } from '../crypto/integrity';
+import { computeHash } from '../crypto/integrity';
 import { 
   saveFileMeta, 
   getFileMeta, 
@@ -64,6 +64,8 @@ interface IncomingTransferState {
   cancelled: boolean;
   chunksReceivedCount: number;
   totalChunks: number;
+  receivedChunks: Set<number>;
+  contiguousIndex: number;
 }
 
 export class FileTransferCoordinator {
@@ -116,7 +118,7 @@ export class FileTransferCoordinator {
     const encTypeData = await encryptText(this.roomKey, file.type);
 
     // Calculate file hash in background
-    const hash = await calculateFileHash(file);
+    const hash = await computeHash(file);
 
     const meta: StoredFileMeta = {
       id: transferId,
@@ -189,7 +191,7 @@ export class FileTransferCoordinator {
     const incoming = this.activeIncoming.get(transferId);
     if (incoming && incoming.paused) {
       incoming.paused = false;
-      this.sendControl({ type: 'resume', transferId, lastReceivedChunkIndex: incoming.chunksReceivedCount - 1 });
+      this.sendControl({ type: 'resume', transferId, contiguousIndex: incoming.contiguousIndex });
     }
   }
 
@@ -256,6 +258,8 @@ export class FileTransferCoordinator {
             cancelled: false,
             chunksReceivedCount: 0,
             totalChunks,
+            receivedChunks: new Set(),
+            contiguousIndex: 0,
           });
 
           // Save metadata
@@ -310,7 +314,7 @@ export class FileTransferCoordinator {
           const outgoing = this.activeOutgoing.get(transferId);
           if (outgoing) {
             outgoing.paused = false;
-            this.streamOutgoing(transferId, msg.lastReceivedChunkIndex + 1);
+            this.streamOutgoing(transferId, msg.contiguousIndex != null ? msg.contiguousIndex : msg.lastReceivedChunkIndex + 1);
           }
           break;
         }
@@ -523,6 +527,10 @@ export class FileTransferCoordinator {
     const incoming = this.activeIncoming.get(transferId);
     if (!incoming || incoming.paused || incoming.cancelled) return;
 
+    // Dedup: skip already received chunks
+    if (incoming.receivedChunks.has(chunkIndex)) return;
+    incoming.receivedChunks.add(chunkIndex);
+
     try {
       // Package IV and ciphertext together for IndexedDB cache
       const chunkBuffer = new Uint8Array(12 + ciphertext.byteLength);
@@ -537,6 +545,11 @@ export class FileTransferCoordinator {
       });
 
       incoming.chunksReceivedCount++;
+
+      // Track contiguous prefix for resume
+      while (incoming.receivedChunks.has(incoming.contiguousIndex)) {
+        incoming.contiguousIndex++;
+      }
 
       const meta = await getFileMeta(transferId);
       const currentBytes = Math.min(incoming.meta.sizeBytes, incoming.chunksReceivedCount * CHUNK_SIZE);
@@ -610,7 +623,7 @@ export class FileTransferCoordinator {
       const blob = new Blob(decryptedBuffers, { type: incoming.meta.fileType });
 
       // Run SHA-256 integrity validation
-      const calculatedHash = await calculateFileHash(blob);
+      const calculatedHash = await computeHash(blob);
       if (calculatedHash !== incoming.meta.hash) {
         throw new Error('Integrity check failed: hash mismatch');
       }
@@ -649,13 +662,15 @@ export class FileTransferCoordinator {
     return new Promise<void>((resolve) => {
       dc.bufferedAmountLowThreshold = BUFFER_LOW_WATERMARK;
 
-      // Guard: already below threshold between the check above and setting the threshold
       if (dc.bufferedAmount < BUFFER_LOW_WATERMARK) {
         resolve();
         return;
       }
 
+      const timer = setTimeout(() => resolve(), 30000);
+
       const onLow = () => {
+        clearTimeout(timer);
         dc.removeEventListener('bufferedamountlow', onLow);
         resolve();
       };

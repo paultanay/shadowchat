@@ -69,7 +69,7 @@ export class SignalingClient {
       this.socket.binaryType = 'arraybuffer';
 
       this.socket.onopen = () => {
-        // Send auth token as first message after connection (never in URL)
+        this.lastPongTime = Date.now();
         this.socket!.send(JSON.stringify({ type: 'auth', token: this.token }));
       };
 
@@ -128,8 +128,9 @@ export class SignalingClient {
   private scheduleReconnect() {
     if (!this.isDisconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
       const delay = Math.min(15000, this.baseDelay * Math.pow(2, this.reconnectAttempts));
+      const jitter = delay * (0.5 + Math.random() * 0.5);
       this.reconnectAttempts++;
-      this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      this.reconnectTimer = setTimeout(() => this.connect(), jitter);
     }
   }
 
@@ -143,7 +144,7 @@ export class SignalingClient {
 
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(payload);
-    } else {
+    } else if (this.sendQueue.length < 1000) {
       this.sendQueue.push(payload);
     }
   }

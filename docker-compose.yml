@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: shadowchat
       POSTGRES_USER: shadow
-      POSTGRES_PASSWORD: shadowsecret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shadowsecret}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./backend/migrations:/docker-entrypoint-initdb.d
@@ -62,7 +62,7 @@ services:
   # ─── Coturn STUN/TURN Server (optional — enable with: docker compose --profile turn up) ───
   coturn:
     profiles: ["turn"]
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.2
     ports:
       - "3478:3478"
       - "3478:3478/udp"
@@ -85,10 +85,10 @@ services:
       - PORT=8080
       - REDIS_URL=redis:6379
       - NATS_URL=nats://nats:4222
-      - DATABASE_URL=postgres://shadow:shadowsecret@postgres:5432/shadowchat?sslmode=disable
-      - TURN_SECRET=shadowchatdevsecretkey1234567890
+      - DATABASE_URL=postgres://shadow:${POSTGRES_PASSWORD:-shadowsecret}@postgres:5432/shadowchat?sslmode=disable
+      - TURN_SECRET=${TURN_SECRET:?TURN_SECRET is required}
       - TURN_URLS=turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp,turns:localhost:5349?transport=tcp
-      - JWT_SECRET=shadowchatdevjwtsecretkey9876543210
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy

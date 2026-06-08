@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Copy dependency files
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod/ \
+    go mod download
 
 # Copy source code
 COPY . .
@@ -19,7 +20,7 @@ FROM alpine:3.20
 WORKDIR /app
 
 # Install certificates for secure connections
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates wget
 
 # Copy binary from builder
 COPY --from=builder /app/server .

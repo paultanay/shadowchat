@@ -42,7 +42,7 @@ func main() {
 	// Start server in goroutine
 	go func() {
 		logger.Info().Str("port", cfg.Port).Msg("Listening for HTTP/WS requests")
-		if err := srv.App.Listen(":" + cfg.Port); err != nil {
+		if err := srv.Listen(":" + cfg.Port); err != nil {
 			logger.Fatal().Err(err).Msg("Failed to start server")
 		}
 	}()
@@ -55,8 +55,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Notify WebSocket clients and close connections gracefully
+	srv.Hub.Shutdown()
+
 	// Shutdown the Fiber application
-	if err := srv.App.ShutdownWithContext(ctx); err != nil {
+	if err := srv.ShutdownWithContext(ctx); err != nil {
 		logger.Error().Err(err).Msg("Error during graceful shutdown")
 	} else {
 		logger.Info().Msg("Server shutdown completed cleanly")

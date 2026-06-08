@@ -111,8 +111,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute("playsinline", "true");
-          videoRef.current.play();
+          videoRef.current.play().catch(() => {});
 
           videoRef.current.onloadedmetadata = () => {
             startScanLoop();
@@ -203,6 +202,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }: QRSca
                 <>
                   <video
                     ref={videoRef}
+                    playsInline
                     className="absolute inset-0 w-full h-full object-cover"
                     aria-label="QR Code Scanner Camera"
                   />

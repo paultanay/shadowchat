@@ -14,23 +14,32 @@ interface QRCodeModalProps {
 
 export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeModalProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState(false);
+  const [qrRetry, setQrRetry] = useState(0);
   const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !url) return;
+    setQrError(false);
 
     QRCode.toDataURL(url, {
       width: 280,
       margin: 2,
       color: {
-        dark: "#F5F2EB", // Bone modules
-        light: "#1A1715", // Deep Card Background
+        dark: "#F5F2EB",
+        light: "#1A1715",
       },
       errorCorrectionLevel: "M",
     })
-      .then(setQrDataUrl)
-      .catch(() => setQrDataUrl(null));
-  }, [isOpen, url]);
+      .then((dataUrl) => {
+        setQrDataUrl(dataUrl);
+        setQrError(false);
+      })
+      .catch(() => {
+        setQrError(true);
+        setQrDataUrl(null);
+      });
+  }, [isOpen, url, qrRetry]);
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(url).catch(() => {});
@@ -67,6 +76,7 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
           >
             {/* Close Button */}
             <button
+              autoFocus
               onClick={onClose}
               className="absolute top-4 right-4 p-1.5 rounded-lg bg-bg-tertiary hover:bg-bg-secondary border border-border-glass transition-all cursor-pointer"
             >
@@ -95,6 +105,16 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
                     alt="Room QR Code"
                     className="w-[240px] h-[240px] rounded-xl"
                   />
+                </div>
+              ) : qrError ? (
+                <div className="w-[240px] h-[240px] flex flex-col items-center justify-center gap-3 bg-bg-tertiary rounded-2xl border border-border-glass shadow-elegant">
+                  <span className="text-xs text-text-muted font-mono">Failed to generate QR</span>
+                  <button
+                    onClick={() => { setQrRetry((c) => c + 1); }}
+                    className="px-3 py-1.5 text-[10px] font-mono bg-bg-secondary border border-border-glass rounded-lg text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+                  >
+                    Retry
+                  </button>
                 </div>
               ) : (
                 <div className="w-[240px] h-[240px] flex items-center justify-center bg-bg-tertiary rounded-2xl border border-border-glass shadow-elegant">

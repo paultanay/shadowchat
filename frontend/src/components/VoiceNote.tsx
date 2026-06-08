@@ -96,6 +96,18 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
 
   const progress = duration > 0 ? currentTime / duration : 0;
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const audio = audioRef.current;
+    if (!audio || duration === 0) return;
+    if (e.key === 'ArrowLeft') {
+      audio.currentTime = Math.max(0, audio.currentTime - 5);
+      setCurrentTime(audio.currentTime);
+    } else if (e.key === 'ArrowRight') {
+      audio.currentTime = Math.min(duration, audio.currentTime + 5);
+      setCurrentTime(audio.currentTime);
+    }
+  }, [duration]);
+
   return (
     <div className="flex items-center gap-2 p-2 min-w-[200px] max-w-[280px]">
       <button
@@ -115,8 +127,12 @@ export default function VoiceNote({ blob, isSelf }: VoiceNoteProps) {
           className="flex items-end gap-[2px] h-9 cursor-pointer"
           onClick={seek}
           role="slider"
-          aria-label="Seek"
+          aria-label="Voice note seek"
+          aria-valuenow={Math.round(currentTime)}
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
           tabIndex={0}
+          onKeyDown={handleKeyDown}
         >
           {(waveform.length > 0 ? waveform : Array(40).fill(0.5)).map((val, i) => {
             const barPct = Math.max(4, (val || 0.5) * 100);

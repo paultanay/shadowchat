@@ -23,6 +23,9 @@ export class PeerConnectionManager {
   private iceServers: RTCIceServer[];
   private signaling: SignalingClient;
   private events: WebRTCEvents;
+  private restartCount = 0;
+  private readonly MAX_RESTARTS = 3;
+  private pendingOffer = false;
 
   constructor(
     peerId: string,
@@ -62,9 +65,27 @@ export class PeerConnectionManager {
       if (!this.pc) return;
       const state = this.pc.connectionState as ConnectionState;
       this.events.onStateChange(state);
-      if (state === 'failed') {
-        console.warn('[PeerConnectionManager] Connection failed, restarting ICE...');
-        this.pc.restartIce();
+    };
+
+    this.pc.onnegotiationneeded = async () => {
+      if (!this.pc || this.pendingOffer || this.restartCount >= this.MAX_RESTARTS) return;
+      this.pendingOffer = true;
+      try {
+        const offer = await this.pc.createOffer();
+        await this.pc.setLocalDescription(offer);
+        if (this.pc.iceGatheringState !== 'complete') {
+          await new Promise<void>((resolve) => {
+            this.pc!.onicegatheringstatechange = () => {
+              if (this.pc!.iceGatheringState === 'complete') resolve();
+            };
+          });
+        }
+        this.signaling.send('offer', this.roomId, this.peerId, {
+          sdp: offer.sdp,
+        });
+        this.restartCount++;
+      } finally {
+        this.pendingOffer = false;
       }
     };
 
@@ -80,10 +101,16 @@ export class PeerConnectionManager {
         this.setupDataChannel(dc);
       }
 
-      // 3. Initiate SDP offer
+      // 3. Initiate SDP offer after ICE gathering completes
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
-      
+      if (this.pc.iceGatheringState !== 'complete') {
+        await new Promise<void>((resolve) => {
+          this.pc!.onicegatheringstatechange = () => {
+            if (this.pc!.iceGatheringState === 'complete') resolve();
+          };
+        });
+      }
       this.signaling.send('offer', this.roomId, this.peerId, {
         sdp: offer.sdp,
       });

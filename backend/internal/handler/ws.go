@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"time"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -14,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// WSAuthMiddleware validates the room query parameter before upgrading
+// WSAuthMiddleware validates the room and JWT query parameters before upgrading
 func WSAuthMiddleware(cfg *config.Config, roomService *service.RoomService, logger zerolog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if !websocket.IsWebSocketUpgrade(c) {
@@ -22,21 +20,33 @@ func WSAuthMiddleware(cfg *config.Config, roomService *service.RoomService, logg
 		}
 
 		roomID := c.Query("room")
-		if roomID == "" {
-			logger.Warn().Msg("WebSocket upgrade rejected: missing room parameter")
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "missing room parameter",
+		token := c.Query("token")
+
+		if roomID == "" || token == "" {
+			logger.Warn().Msg("WebSocket upgrade rejected: missing room or token parameter")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "room and token query params required",
 			})
 		}
 
-		// Store room ID for post-upgrade handler
+		// Parse and validate JWT immediately
+		claims, err := crypto.ValidateRoomToken(cfg.JwtSecret, token)
+		if err != nil || claims.RoomID != roomID {
+			logger.Warn().Err(err).Msg("WebSocket upgrade rejected: invalid token")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "invalid token",
+			})
+		}
+
+		// Store validated claims and room ID in context
+		c.Locals("room_claims", claims)
 		c.Locals("room_id", roomID)
 
 		return c.Next()
 	}
 }
 
-// WSHandler handles upgraded websocket connections with post-connect auth
+// WSHandler handles upgraded websocket connections with pre-validated auth
 func WSHandler(h *hub.Hub, cfg *config.Config, roomService *service.RoomService, logger zerolog.Logger) fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		roomID, ok := c.Locals("room_id").(string)
@@ -45,46 +55,16 @@ func WSHandler(h *hub.Hub, cfg *config.Config, roomService *service.RoomService,
 			return
 		}
 
-		// Read first message as authentication
-		c.SetReadDeadline(time.Now().Add(10 * time.Second))
-		_, payload, err := c.ReadMessage()
-		if err != nil {
-			logger.Warn().Err(err).Msg("WS auth: failed to read auth message")
-			return
-		}
-		c.SetReadDeadline(time.Time{})
-
-		var authMsg struct {
-			Type  string `json:"type"`
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(payload, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Token == "" {
-			logger.Warn().Msg("WS auth: invalid auth message format")
-			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"invalid auth"}`))
-			return
-		}
-
-		claims, err := crypto.ValidateRoomToken(cfg.JwtSecret, authMsg.Token)
-		if err != nil {
-			logger.Warn().Err(err).Msg("WS auth: invalid token")
-			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"invalid token"}`))
-			return
-		}
-
-		if claims.RoomID != roomID {
-			logger.Warn().Str("token_room", claims.RoomID).Str("query_room", roomID).Msg("WS auth: room mismatch")
-			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"room mismatch"}`))
+		claims, ok := c.Locals("room_claims").(*crypto.RoomClaims)
+		if !ok || claims == nil {
+			logger.Error().Msg("WS handler: missing room_claims in locals")
 			return
 		}
 
 		if err := roomService.ValidateAccess(context.Background(), roomID); err != nil {
-			logger.Warn().Err(err).Str("room_id", roomID).Msg("WS auth: access validation failed")
-			c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":false,"error":"access denied"}`))
+			logger.Warn().Err(err).Str("room_id", roomID).Msg("WS: access validation failed")
 			return
 		}
-
-		// Auth success — send confirmation and proceed
-		c.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","success":true}`))
 
 		peerID := claims.PeerID
 		client := hub.NewClient(peerID, roomID, c, h, logger)
@@ -92,7 +72,7 @@ func WSHandler(h *hub.Hub, cfg *config.Config, roomService *service.RoomService,
 		h.Register <- client
 		go client.WritePump()
 
-		// Read pump handles all subsequent messages (resets read deadline)
+		// Read pump handles all subsequent messages
 		client.ReadPump()
 	})
 }

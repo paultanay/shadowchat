@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
+	"regexp"
 	"time"
 
 	"github.com/paultanay/shadowchat/internal/repository"
 )
+
+var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 var (
 	ErrRoomIsLocked  = errors.New("room is locked")
@@ -49,7 +53,30 @@ type CreateRoomParams struct {
 	OwnerID         *string       `json:"owner_id"`
 }
 
+func (p *CreateRoomParams) Validate() error {
+	if p.MaxMembers < 1 || p.MaxMembers > 1000 {
+		return fmt.Errorf("max_members must be between 1 and 1000")
+	}
+	if p.Lifetime > 720*time.Hour {
+		return fmt.Errorf("lifetime must not exceed 30 days (720 hours)")
+	}
+	if p.ID != "" && !uuidRegex.MatchString(p.ID) {
+		return fmt.Errorf("id must be a valid UUID")
+	}
+	if len(p.EncryptedName) > 64*1024 {
+		return fmt.Errorf("encrypted_name must not exceed 64KB")
+	}
+	if len(p.EncryptedConfig) > 64*1024 {
+		return fmt.Errorf("encrypted_config must not exceed 64KB")
+	}
+	return nil
+}
+
 func (s *RoomService) CreateRoom(ctx context.Context, params CreateRoomParams) (*repository.Room, error) {
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+
 	code, err := GenerateRoomCode()
 	if err != nil {
 		return nil, err

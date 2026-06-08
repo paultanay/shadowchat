@@ -55,8 +55,8 @@ export const progressBar = {
 export const pulseGlow = {
   animate: {
     boxShadow: [
-      "0 0 0 0 rgba(59, 130, 246, 0.4)",
-      "0 0 0 12px rgba(59, 130, 246, 0)",
+      "0 0 0 0 rgba(247, 185, 67, 0.4)",
+      "0 0 0 12px rgba(247, 185, 67, 0)",
     ],
     transition: { duration: 1.5, repeat: Infinity },
   },
@@ -67,8 +67,8 @@ export const dropZone = {
   idle: { scale: 1, borderColor: "rgba(255, 255, 255, 0.1)" },
   active: {
     scale: 1.02,
-    borderColor: "rgba(59, 130, 246, 0.6)",
-    backgroundColor: "rgba(59, 130, 246, 0.08)",
+    borderColor: "rgba(247, 185, 67, 0.6)",
+    backgroundColor: "rgba(247, 185, 67, 0.08)",
     transition: { type: "spring", stiffness: 400, damping: 25 },
   },
 };
@@ -97,7 +97,7 @@ export const buttonHover = { whileHover: { scale: 1.02, y: -1 } };
 export const cardHover = {
   whileHover: {
     y: -4,
-    boxShadow: "0 0 40px rgba(59, 130, 246, 0.15)",
+    boxShadow: "0 0 40px rgba(247, 185, 67, 0.15)",
     transition: { type: "spring", stiffness: 300, damping: 20 },
   },
 };

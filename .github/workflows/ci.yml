@@ -18,7 +18,7 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
           cache-dependency-path: backend/go.sum
 
@@ -58,9 +58,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache frontend dependencies
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Frontend Dependencies
         run: |
@@ -76,6 +82,13 @@ jobs:
         run: |
           cd frontend
           npm run lint
+
+      - name: Create frontend .env for CI
+        working-directory: frontend
+        run: |
+          cp .env.example .env
+          echo "NEXT_PUBLIC_SIGNALING_URL=ws://localhost:8080/ws" >> .env
+          echo "NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1" >> .env
 
       - name: Build Next.js Production Package
         run: |

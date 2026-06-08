@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -27,6 +28,18 @@ type Server struct {
 	Nats      *nats.Broker
 	Hub       *hub.Hub
 	cancelHub context.CancelFunc
+}
+
+func connectWithRetry(name string, maxAttempts int, fn func() error, logger zerolog.Logger) error {
+	for i := 0; i < maxAttempts; i++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		logger.Warn().Err(err).Int("attempt", i+1).Str("service", name).Msg("connection failed, retrying...")
+		time.Sleep(time.Duration(i+1) * time.Second)
+	}
+	return fmt.Errorf("%s: max retry attempts (%d) exceeded", name, maxAttempts)
 }
 
 func New(cfg *config.Config, logger zerolog.Logger) *Server {
@@ -61,28 +74,22 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		broker *nats.Broker
 		err    error
 	)
-	for i := 0; i < 5; i++ {
-		db, err = repository.ConnectDB(cfg.DatabaseURL, logger)
-		if err == nil {
-			break
-		}
-		logger.Warn().Err(err).Int("attempt", i+1).Msg("PostgreSQL connection failed, retrying...")
-		time.Sleep(time.Duration(1<<i) * time.Second)
-	}
+	err = connectWithRetry("PostgreSQL", 5, func() error {
+		var e error
+		db, e = repository.ConnectDB(cfg.DatabaseURL, logger)
+		return e
+	}, logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to connect to PostgreSQL after 5 attempts")
 	}
 
 	// Connect to Redis (optional — skip if no URL configured)
 	if cfg.RedisURL != "" {
-		for i := 0; i < 5; i++ {
-			rdb, err = redis.Connect(cfg.RedisURL, logger)
-			if err == nil {
-				break
-			}
-			logger.Warn().Err(err).Int("attempt", i+1).Msg("Redis connection failed, retrying...")
-			time.Sleep(time.Duration(1<<i) * time.Second)
-		}
+		err = connectWithRetry("Redis", 5, func() error {
+			var e error
+			rdb, e = redis.Connect(cfg.RedisURL, logger)
+			return e
+		}, logger)
 		if err != nil {
 			logger.Fatal().Err(err).Msg("Failed to connect to Redis after 5 attempts")
 		}
@@ -92,14 +99,11 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 
 	// Connect to NATS (optional — skip for single-instance mode)
 	if cfg.NatsURL != "" {
-		for i := 0; i < 5; i++ {
-			broker, err = nats.Connect(cfg.NatsURL, logger)
-			if err == nil {
-				break
-			}
-			logger.Warn().Err(err).Int("attempt", i+1).Msg("NATS connection failed, retrying...")
-			time.Sleep(time.Duration(1<<i) * time.Second)
-		}
+		err = connectWithRetry("NATS", 5, func() error {
+			var e error
+			broker, e = nats.Connect(cfg.NatsURL, logger)
+			return e
+		}, logger)
 		if err != nil {
 			logger.Fatal().Err(err).Msg("Failed to connect to NATS after 5 attempts")
 		}
@@ -163,6 +167,14 @@ func (s *Server) setupRoutes(roomService *service.RoomService) {
 
 	// WebSocket Signaling Route (auth happens after upgrade via first message)
 	s.App.Get("/ws", handler.WSAuthMiddleware(s.Cfg, roomService, s.Logger), handler.WSHandler(s.Hub, s.Cfg, roomService, s.Logger))
+}
+
+func (s *Server) Listen(addr string) error {
+	return s.App.Listen(addr)
+}
+
+func (s *Server) ShutdownWithContext(ctx context.Context) error {
+	return s.App.ShutdownWithContext(ctx)
 }
 
 // Close gracefully shuts down the server services (DB, Redis, NATS, Hub context)

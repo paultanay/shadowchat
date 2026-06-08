@@ -22,6 +22,8 @@ Any vulnerability that allows the signaling server to decrypt message payloads, 
 
 Please do **NOT** open public issues for security vulnerabilities. Instead, report security vulnerabilities by emailing the security team or the project maintainers directly.
 
+Please report vulnerabilities via GitHub Security Advisories: https://github.com/paultanay/shadowchat/security/advisories/new
+
 When reporting, please include:
 1. A clear description of the vulnerability.
 2. A proof of concept (PoC) or step-by-step instructions to reproduce.

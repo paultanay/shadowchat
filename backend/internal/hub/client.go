@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/contrib/websocket"
@@ -27,6 +28,7 @@ type Client struct {
 	Conn   *websocket.Conn
 	Send   chan []byte
 	Hub    *Hub
+	closed atomic.Bool
 	logger zerolog.Logger
 }
 
@@ -126,6 +128,9 @@ func (c *Client) WritePump() {
 }
 
 func (c *Client) SendJSON(msg *SignalMessage) {
+	if c.closed.Load() {
+		return
+	}
 	data, err := msg.Serialize()
 	if err != nil {
 		c.logger.Error().Err(err).Msg("Failed to serialize message to client")

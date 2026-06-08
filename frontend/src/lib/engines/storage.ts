@@ -61,37 +61,37 @@ export const db = new ShadowChatDatabase();
 
 // Repository helper functions
 export async function saveRoom(room: StoredRoom): Promise<void> {
-  await db.rooms.put(room);
+  try { await db.rooms.put(room); } catch { /* silent */ }
 }
 
 export async function saveFileMeta(file: StoredFileMeta): Promise<void> {
-  await db.files.put(file);
+  try { await db.files.put(file); } catch { /* silent */ }
 }
 
 export async function getFileMeta(id: string): Promise<StoredFileMeta | undefined> {
-  return await db.files.get(id);
+  try { return await db.files.get(id); } catch { return undefined; }
 }
 
 export async function getRoomFiles(roomId: string): Promise<StoredFileMeta[]> {
-  return await db.files.where('roomId').equals(roomId).sortBy('addedAt').then(r => r.reverse());
+  try { return await db.files.where('roomId').equals(roomId).sortBy('addedAt').then(r => r.reverse()); } catch { return []; }
 }
 
 export async function saveMessage(msg: StoredMessage): Promise<number> {
-  return await db.messages.add(msg);
+  try { return await db.messages.add(msg); } catch { return 0; }
 }
 
 export async function getRoomMessages(roomId: string): Promise<StoredMessage[]> {
-  return await db.messages.where('roomId').equals(roomId).sortBy('timestamp');
+  try { return await db.messages.where('roomId').equals(roomId).sortBy('timestamp'); } catch { return []; }
 }
 
 export async function saveChunk(chunk: StoredChunk): Promise<number> {
-  return await db.chunks.add(chunk);
+  try { return await db.chunks.add(chunk); } catch { return 0; }
 }
 
 export async function getTransferChunks(transferId: string): Promise<StoredChunk[]> {
-  return await db.chunks.where('transferId').equals(transferId).sortBy('chunkIndex');
+  try { return await db.chunks.where('transferId').equals(transferId).sortBy('chunkIndex'); } catch { return []; }
 }
 
 export async function clearTransferChunks(transferId: string): Promise<void> {
-  await db.chunks.where('transferId').equals(transferId).delete();
+  try { await db.chunks.where('transferId').equals(transferId).delete(); } catch { /* silent */ }
 }

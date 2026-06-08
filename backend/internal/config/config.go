@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 )
 
@@ -17,17 +18,27 @@ type Config struct {
 }
 
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
 		RedisURL:    getEnv("REDIS_URL", ""),
 		NatsURL:     getEnv("NATS_URL", ""),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://shadow:shadowsecret@localhost:5432/shadowchat?sslmode=disable"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
 		TurnSecret:  getEnv("TURN_SECRET", ""),
 		TurnURLs:    getEnv("TURN_URLS", "turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp,turns:localhost:5349?transport=tcp"),
 		JwtSecret:   getEnv("JWT_SECRET", ""),
 		Env:         getEnv("ENV", "development"),
 		CorsOrigins: getEnv("CORS_ORIGINS", "http://localhost:3000, http://localhost:3001, http://127.0.0.1:3000, http://127.0.0.1:3001, http://localhost:8080"),
 	}
+
+	RequiredSecret("JWT_SECRET", cfg.JwtSecret)
+	if cfg.TurnURLs != "" {
+		RequiredSecret("TURN_SECRET", cfg.TurnSecret)
+	}
+	if cfg.DatabaseURL == "" {
+		log.Fatalf("FATAL: DATABASE_URL is required but not set")
+	}
+
+	return cfg
 }
 
 func (c *Config) Validate() []string {
@@ -47,6 +58,12 @@ func (c *Config) Validate() []string {
 		}
 	}
 	return warnings
+}
+
+func RequiredSecret(name, value string) {
+	if value == "" {
+		log.Fatalf("FATAL: %s is required but not set", name)
+	}
 }
 
 func getEnv(key, defaultValue string) string {

@@ -15,7 +15,7 @@ Please review and adhere to our [Code of Conduct](CODE_OF_CONDUCT.md) in all com
 ShadowChat is a monorepo containing a **Go signaling backend** and a **Next.js frontend**.
 
 ### Prerequisites
-- **Go** (v1.22+)
+- **Go** (v1.25+)
 - **Node.js** (v20+ / npm v10+)
 - **Docker Desktop** (Required for database, cache, and broker cluster virtualization)
 
@@ -55,8 +55,8 @@ Perfect for hot-reloading frontend/backend code directly on your local system:
 2. Copy environmental configs for the backend:
    ```bash
    cd backend
-   cp .env.example .env
-   # Modify .env to fit your local ports if necessary
+    cp .env.example .env   # Linux/macOS: use 'cp'; Windows: use 'copy .env.example .env' (CMD) or 'Copy-Item .env.example .env' (PowerShell)
+    # Modify .env to fit your local ports if necessary
    ```
 3. Run the Go Signaling Server:
    ```bash
@@ -65,7 +65,7 @@ Perfect for hot-reloading frontend/backend code directly on your local system:
 4. Copy configs for Next.js:
    ```bash
    cd ../frontend
-   cp .env.example .env.local
+   cp .env.example .env.local   # Linux/macOS: use 'cp'; Windows: use 'copy .env.example .env.local' (CMD) or 'Copy-Item .env.example .env.local' (PowerShell)
    ```
 5. Install packages & run the frontend development server:
    ```bash

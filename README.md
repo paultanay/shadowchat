@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/paultanay/shadowchat/actions"><img src="https://img.shields.io/badge/CI-Passing-brightgreen?style=flat-square" alt="CI Status" /></a>
+  <a href="https://github.com/paultanay/shadowchat/actions"><img src="https://github.com/paultanay/shadowchat/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>
   <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.22%2B-blue?style=flat-square" alt="Go Version" /></a>
   <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16%2B-black?style=flat-square" alt="Next.js Version" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19%2B-61dafb?style=flat-square" alt="React Version" /></a>
@@ -81,7 +81,7 @@ The fastest and most robust way to run ShadowChat locally is using Docker Compos
 ### 1. Boot Up Docker Stack
 Ensure **Docker Desktop / Docker Engine** is active, then run:
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 ### 2. Open ShadowChat

@@ -10,7 +10,7 @@ import { deriveRoomKey } from '../crypto/hkdf';
 
 // Helper: Convert string to ArrayBuffer
 export function stringToBuffer(str: string): ArrayBuffer {
-  return new TextEncoder().encode(str).buffer as ArrayBuffer;
+  return new TextEncoder().encode(str).buffer.slice(0);
 }
 
 // Helper: Convert ArrayBuffer to string
@@ -31,12 +31,11 @@ export function base64ToBytes(base64: string): Uint8Array {
 // Helper: Uint8Array/ArrayBuffer to Base64
 export function bytesToBase64(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chars = new Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) {
+    chars[i] = String.fromCharCode(bytes[i]);
   }
-  return window.btoa(binary);
+  return window.btoa(chars.join(''));
 }
 
 export interface EncryptedData {

@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gonats "github.com/nats-io/nats.go"
@@ -20,14 +21,15 @@ type LocalRoom struct {
 }
 
 type Hub struct {
-	rooms       sync.Map // map[string]*LocalRoom
-	Register    chan *Client
-	Unregister  chan *Client
-	Broadcast   chan *SignalMessage
-	broker      *nats.Broker
-	cache       *redis.Cache
-	roomService *service.RoomService
-	logger      zerolog.Logger
+	rooms        sync.Map // map[string]*LocalRoom
+	Register     chan *Client
+	Unregister   chan *Client
+	Broadcast    chan *SignalMessage
+	broker       *nats.Broker
+	cache        *redis.Cache
+	roomService  *service.RoomService
+	shuttingDown atomic.Bool
+	logger       zerolog.Logger
 }
 
 func NewHub(broker *nats.Broker, cache *redis.Cache, roomService *service.RoomService, logger zerolog.Logger) *Hub {
@@ -62,7 +64,49 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
+func (h *Hub) Shutdown() {
+	h.shuttingDown.Store(true)
+	h.logger.Warn().Msg("Hub shutting down, notifying connected clients...")
+
+	h.rooms.Range(func(key, value interface{}) bool {
+		lr := value.(*LocalRoom)
+		lr.mu.RLock()
+		for _, client := range lr.Clients {
+			client.SendJSON(&SignalMessage{
+				Type:   TypeServerShutdown,
+				RoomID: client.RoomID,
+			})
+		}
+		lr.mu.RUnlock()
+		return true
+	})
+
+	// Wait briefly for sent messages to be flushed
+	time.Sleep(500 * time.Millisecond)
+
+	// Close all connections to trigger unregister
+	h.rooms.Range(func(key, value interface{}) bool {
+		lr := value.(*LocalRoom)
+		lr.mu.Lock()
+		for _, client := range lr.Clients {
+			client.closed.Store(true)
+			client.Conn.Close()
+		}
+		lr.mu.Unlock()
+		return true
+	})
+
+	// Wait for unregister processing
+	time.Sleep(1 * time.Second)
+	h.logger.Info().Msg("Hub shutdown complete")
+}
+
 func (h *Hub) handleRegister(ctx context.Context, client *Client) {
+	if h.shuttingDown.Load() {
+		h.logger.Warn().Str("client_id", client.ID).Msg("Rejecting registration during shutdown")
+		client.SendError(5000, "Server is shutting down")
+		return
+	}
 	h.logger.Info().Str("client_id", client.ID).Str("room_id", client.RoomID).Msg("Client registering")
 
 	var lr *LocalRoom
@@ -170,6 +214,7 @@ func (h *Hub) handleUnregister(ctx context.Context, client *Client) {
 		return
 	}
 	delete(lr.Clients, client.ID)
+	client.closed.Store(true)
 	close(client.Send)
 	isEmpty := len(lr.Clients) == 0
 	lr.mu.Unlock()

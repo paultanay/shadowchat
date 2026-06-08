@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -51,11 +52,34 @@ func (b *Broker) Close() {
 	}
 }
 
+func validRoomID(roomID string) bool {
+	if roomID == "" {
+		return false
+	}
+	for _, c := range roomID {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		case c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (b *Broker) PublishRoomMessage(roomID string, data []byte) error {
+	if !validRoomID(roomID) {
+		return fmt.Errorf("invalid roomID: contains NATS metacharacters")
+	}
 	return b.conn.Publish("room."+roomID, data)
 }
 
 func (b *Broker) SubscribeRoom(roomID string, handler func([]byte)) (*gonats.Subscription, error) {
+	if !validRoomID(roomID) {
+		return nil, fmt.Errorf("invalid roomID: contains NATS metacharacters")
+	}
 	return b.conn.Subscribe("room."+roomID, func(msg *gonats.Msg) {
 		handler(msg.Data)
 	})
