@@ -86,8 +86,8 @@ jobs:
       - name: Create frontend .env for CI
         working-directory: frontend
         run: |
-          cp .env.example .env
-          echo "NEXT_PUBLIC_SIGNALING_URL=ws://localhost:8080/ws" >> .env
+          touch .env
+          echo "NEXT_PUBLIC_SIGNALING_URL=ws://localhost:8080/ws" > .env
           echo "NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1" >> .env
 
       - name: Build Next.js Production Package
