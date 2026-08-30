@@ -857,7 +857,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
         client.on('offer', async ({ from, sdp }) => {
           console.log('[roomStore] offer from:', from);
-          let peer = get().peers.get(from);
+          const peer = get().peers.get(from);
           if (!peer) {
             const currentPeerId = get().peerId;
             if (currentPeerId) {
