@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/paultanay/shadowchat/internal/repository"
 )
 
@@ -54,8 +55,8 @@ type CreateRoomParams struct {
 }
 
 func (p *CreateRoomParams) Validate() error {
-	if p.MaxMembers < 1 || p.MaxMembers > 1000 {
-		return fmt.Errorf("max_members must be between 1 and 1000")
+	if p.MaxMembers < 0 || p.MaxMembers > 1000 {
+		return fmt.Errorf("max_members must be between 0 and 1000")
 	}
 	if p.Lifetime > 720*time.Hour {
 		return fmt.Errorf("lifetime must not exceed 30 days (720 hours)")
@@ -97,8 +98,14 @@ func (s *RoomService) CreateRoom(ctx context.Context, params CreateRoomParams) (
 		expiresAt = &exp
 	}
 
+	// Generate UUID if not provided
+	id := params.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
+
 	room := &repository.Room{
-		ID:              params.ID,
+		ID:              id,
 		EncryptedName:   params.EncryptedName,
 		EncryptedConfig: params.EncryptedConfig,
 		RoomCode:        code,

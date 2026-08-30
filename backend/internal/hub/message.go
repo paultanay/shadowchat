@@ -5,20 +5,20 @@ import "encoding/json"
 type MessageType string
 
 const (
-	// Client -> Server & Server -> Client Relays
+	// Relayed between peers via the signaling server (opaque payloads).
 	TypeOffer       MessageType = "offer"
 	TypeAnswer      MessageType = "answer"
 	TypeIce         MessageType = "ice"
 	TypeKeyExchange MessageType = "key-exchange"
 	TypePresence    MessageType = "presence"
 
-	// Client -> Server commands
+	// Client-to-server commands.
 	TypeJoin  MessageType = "join"
 	TypeLeave MessageType = "leave"
 	TypePing  MessageType = "ping"
-	TypeAuth  MessageType = "auth" // client sends auth token; server responds with auth ack
+	TypeAuth  MessageType = "auth"
 
-	// Server -> Client notifications
+	// Server-to-client notifications.
 	TypePeerJoined     MessageType = "peer-joined"
 	TypePeerLeft       MessageType = "peer-left"
 	TypeRoomState      MessageType = "room-state"
@@ -27,7 +27,7 @@ const (
 	TypeServerShutdown MessageType = "server-shutdown"
 )
 
-// SignalMessage is the unified envelope for all signaling protocol packets
+// SignalMessage is the unified envelope for all signaling protocol packets.
 type SignalMessage struct {
 	Type      MessageType     `json:"type"`
 	RoomID    string          `json:"room,omitempty"`
@@ -37,14 +37,18 @@ type SignalMessage struct {
 	Token     string          `json:"token,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`
-	Payload   string          `json:"payload,omitempty"` // used for opaque key-exchange payloads
-	Status    string          `json:"status,omitempty"`  // online, typing, idle
-	Peers     []string        `json:"peers,omitempty"`   // active room peer IDs list
+	Payload   string          `json:"payload,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	Peers     []string        `json:"peers,omitempty"`
 	PeerCount int             `json:"peerCount,omitempty"`
 	Code      int             `json:"code,omitempty"`
 	Message   string          `json:"message,omitempty"`
-	Success   bool            `json:"success,omitempty"` // used for auth ack
-	Error     string          `json:"error,omitempty"`   // used for auth failure reason
+	Success   bool            `json:"success,omitempty"`
+	Error     string          `json:"error,omitempty"`
+
+	// NatsOrigin is an internal flag — never serialised to JSON.
+	// When true the hub skips re-publishing to NATS, preventing fanout loops.
+	NatsOrigin bool `json:"-"`
 }
 
 func (m *SignalMessage) Serialize() ([]byte, error) {

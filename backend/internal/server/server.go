@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -23,7 +24,6 @@ type Server struct {
 	App       *fiber.App
 	Cfg       *config.Config
 	Logger    zerolog.Logger
-	DB        *repository.DB
 	Redis     *redis.Cache
 	Nats      *nats.Broker
 	Hub       *hub.Hub
@@ -32,11 +32,11 @@ type Server struct {
 
 func connectWithRetry(name string, maxAttempts int, fn func() error, logger zerolog.Logger) error {
 	for i := 0; i < maxAttempts; i++ {
-		err := fn()
-		if err == nil {
+		if err := fn(); err == nil {
 			return nil
+		} else {
+			logger.Warn().Err(err).Int("attempt", i+1).Str("service", name).Msg("connection failed, retrying...")
 		}
-		logger.Warn().Err(err).Int("attempt", i+1).Str("service", name).Msg("connection failed, retrying...")
 		time.Sleep(time.Duration(i+1) * time.Second)
 	}
 	return fmt.Errorf("%s: max retry attempts (%d) exceeded", name, maxAttempts)
@@ -47,9 +47,17 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		DisableStartupMessage: true,
 	})
 
-	// Add basic middlewares
 	app.Use(recover.New())
 	app.Use(middleware.StructuredLogger(logger))
+
+	// Build the allowed origins set for CORS and WebSocket origin checking.
+	allowedOrigins := cfg.AllowedOrigins()
+	originSet := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		originSet[o] = struct{}{}
+	}
+
+	// CORS for REST endpoints. Credentials are allowed only when origins are explicit.
 	allowCreds := cfg.CorsOrigins != "*"
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CorsOrigins,
@@ -58,34 +66,27 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		AllowCredentials: allowCreds,
 	}))
 
-	// Security Headers Middleware
+	// Security headers for all responses including WebSocket upgrades.
+	// The CSP connect-src directive permits WebSocket connections back to the
+	// same host, which is necessary for browser-initiated WebSocket upgrades.
 	app.Use(func(c *fiber.Ctx) error {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none';")
+		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// Allow WebSocket connections to the same host.
+		c.Set("Content-Security-Policy",
+			"default-src 'self'; connect-src 'self' ws: wss:; script-src 'self'; frame-ancestors 'none';")
 		return c.Next()
 	})
 
-	// Connect to PostgreSQL with retry
+	// Optional Redis — skipped when URL is empty.
 	var (
-		db     *repository.DB
 		rdb    *redis.Cache
 		broker *nats.Broker
-		err    error
 	)
-	err = connectWithRetry("PostgreSQL", 5, func() error {
-		var e error
-		db, e = repository.ConnectDB(cfg.DatabaseURL, logger)
-		return e
-	}, logger)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to connect to PostgreSQL after 5 attempts")
-	}
-
-	// Connect to Redis (optional — skip if no URL configured)
 	if cfg.RedisURL != "" {
-		err = connectWithRetry("Redis", 5, func() error {
+		err := connectWithRetry("Redis", 5, func() error {
 			var e error
 			rdb, e = redis.Connect(cfg.RedisURL, logger)
 			return e
@@ -97,9 +98,9 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		logger.Info().Msg("Redis not configured — running without presence cache")
 	}
 
-	// Connect to NATS (optional — skip for single-instance mode)
+	// Optional NATS — skipped when URL is empty.
 	if cfg.NatsURL != "" {
-		err = connectWithRetry("NATS", 5, func() error {
+		err := connectWithRetry("NATS", 5, func() error {
 			var e error
 			broker, e = nats.Connect(cfg.NatsURL, logger)
 			return e
@@ -111,12 +112,11 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		logger.Info().Msg("NATS not configured — running in single-instance mode")
 	}
 
-	// Instantiate Repo & Service Layers
-	roomRepo := repository.NewPostgresRoomRepository(db)
+	// In-memory room store — zero external dependencies.
+	roomRepo := repository.NewMemoryRoomRepository()
 	roomService := service.NewRoomService(roomRepo)
 
-	// Instantiate Signaling Hub
-	hubObj := hub.NewHub(broker, rdb, roomService, logger)
+	hubObj := hub.NewHub(broker, rdb, logger)
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	go hubObj.Run(hubCtx)
 
@@ -124,22 +124,19 @@ func New(cfg *config.Config, logger zerolog.Logger) *Server {
 		App:       app,
 		Cfg:       cfg,
 		Logger:    logger,
-		DB:        db,
 		Redis:     rdb,
 		Nats:      broker,
 		Hub:       hubObj,
 		cancelHub: hubCancel,
 	}
 
-	s.setupRoutes(roomService)
-
+	s.setupRoutes(roomService, originSet)
 	return s
 }
 
-func (s *Server) setupRoutes(roomService *service.RoomService) {
+func (s *Server) setupRoutes(roomService *service.RoomService, originSet map[string]struct{}) {
 	api := s.App.Group("/api/v1")
 
-	// Health check endpoint
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"status": "healthy",
@@ -147,26 +144,43 @@ func (s *Server) setupRoutes(roomService *service.RoomService) {
 		})
 	})
 
-	// REST Handlers
+	// Room-creation and join are rate-limited: 5 req/s burst 10 per IP.
+	roomLimiter := middleware.RateLimit(5, 10)
+
 	roomHandler := handler.NewRoomHandler(roomService, s.Cfg, s.Logger)
 	turnHandler := handler.NewTurnHandler(s.Cfg)
 
-	// Room CRUD (REST)
-	api.Post("/rooms", roomHandler.Create)
-	api.Post("/rooms/join", roomHandler.Join)
+	api.Post("/rooms", roomLimiter, roomHandler.Create)
+	api.Post("/rooms/join", roomLimiter, roomHandler.Join)
 	api.Get("/rooms/:id", roomHandler.GetMetadata)
 
-	// Protected Room endpoints (JWT room-specific bearer token auth required)
 	protected := api.Group("", handler.RoomAuthMiddleware(s.Cfg.JwtSecret))
 	protected.Post("/rooms/:id/lock", roomHandler.Lock)
 	protected.Post("/rooms/:id/unlock", roomHandler.Unlock)
 	protected.Delete("/rooms/:id", roomHandler.Destroy)
-
-	// Ephemeral TURN credentials (restricted to active authenticated room members)
 	protected.Get("/turn/credentials", turnHandler.GetCredentials)
 
-	// WebSocket Signaling Route (auth happens after upgrade via first message)
-	s.App.Get("/ws", handler.WSAuthMiddleware(s.Cfg, roomService, s.Logger), handler.WSHandler(s.Hub, s.Cfg, roomService, s.Logger))
+	// WebSocket — validate Origin header before upgrade to prevent CSWSH.
+	wsOriginGuard := func(c *fiber.Ctx) error {
+		origin := c.Get("Origin")
+		if origin == "" {
+			// No Origin header — non-browser client; allow (e.g. server-side tests).
+			return c.Next()
+		}
+		// Strip trailing slash for normalisation.
+		origin = strings.TrimRight(origin, "/")
+		if _, ok := originSet[origin]; !ok && s.Cfg.CorsOrigins != "*" {
+			s.Logger.Warn().Str("origin", origin).Msg("WebSocket upgrade rejected: origin not allowed")
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "origin not allowed"})
+		}
+		return c.Next()
+	}
+
+	s.App.Get("/ws",
+		wsOriginGuard,
+		handler.WSAuthMiddleware(s.Cfg, roomService, s.Logger),
+		handler.WSHandler(s.Hub, s.Cfg, s.Logger),
+	)
 }
 
 func (s *Server) Listen(addr string) error {
@@ -177,13 +191,9 @@ func (s *Server) ShutdownWithContext(ctx context.Context) error {
 	return s.App.ShutdownWithContext(ctx)
 }
 
-// Close gracefully shuts down the server services (DB, Redis, NATS, Hub context)
 func (s *Server) Close() {
 	s.Logger.Info().Msg("Closing infrastructure connections...")
 	s.cancelHub()
-	if s.DB != nil {
-		s.DB.Close()
-	}
 	if s.Redis != nil {
 		s.Redis.Close()
 	}

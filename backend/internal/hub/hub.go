@@ -9,7 +9,6 @@ import (
 	gonats "github.com/nats-io/nats.go"
 	"github.com/paultanay/shadowchat/internal/nats"
 	"github.com/paultanay/shadowchat/internal/redis"
-	"github.com/paultanay/shadowchat/internal/service"
 	"github.com/rs/zerolog"
 )
 
@@ -27,20 +26,18 @@ type Hub struct {
 	Broadcast    chan *SignalMessage
 	broker       *nats.Broker
 	cache        *redis.Cache
-	roomService  *service.RoomService
 	shuttingDown atomic.Bool
 	logger       zerolog.Logger
 }
 
-func NewHub(broker *nats.Broker, cache *redis.Cache, roomService *service.RoomService, logger zerolog.Logger) *Hub {
+func NewHub(broker *nats.Broker, cache *redis.Cache, logger zerolog.Logger) *Hub {
 	return &Hub{
-		Register:    make(chan *Client),
-		Unregister:  make(chan *Client),
-		Broadcast:   make(chan *SignalMessage, 1024),
-		broker:      broker,
-		cache:       cache,
-		roomService: roomService,
-		logger:      logger.With().Str("component", "signaling-hub").Logger(),
+		Register:   make(chan *Client),
+		Unregister: make(chan *Client),
+		Broadcast:  make(chan *SignalMessage, 1024),
+		broker:     broker,
+		cache:      cache,
+		logger:     logger.With().Str("component", "signaling-hub").Logger(),
 	}
 }
 
@@ -50,13 +47,10 @@ func (h *Hub) Run(ctx context.Context) {
 		select {
 		case client := <-h.Register:
 			h.handleRegister(ctx, client)
-
 		case client := <-h.Unregister:
 			h.handleUnregister(ctx, client)
-
 		case msg := <-h.Broadcast:
 			h.handleBroadcast(ctx, msg)
-
 		case <-ctx.Done():
 			h.logger.Info().Msg("Signaling Hub shutting down")
 			return
@@ -68,7 +62,7 @@ func (h *Hub) Shutdown() {
 	h.shuttingDown.Store(true)
 	h.logger.Warn().Msg("Hub shutting down, notifying connected clients...")
 
-	h.rooms.Range(func(key, value interface{}) bool {
+	h.rooms.Range(func(_, value interface{}) bool {
 		lr := value.(*LocalRoom)
 		lr.mu.RLock()
 		for _, client := range lr.Clients {
@@ -81,11 +75,10 @@ func (h *Hub) Shutdown() {
 		return true
 	})
 
-	// Wait briefly for sent messages to be flushed
+	// Allow messages to flush before closing connections.
 	time.Sleep(500 * time.Millisecond)
 
-	// Close all connections to trigger unregister
-	h.rooms.Range(func(key, value interface{}) bool {
+	h.rooms.Range(func(_, value interface{}) bool {
 		lr := value.(*LocalRoom)
 		lr.mu.Lock()
 		for _, client := range lr.Clients {
@@ -96,15 +89,13 @@ func (h *Hub) Shutdown() {
 		return true
 	})
 
-	// Wait for unregister processing
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	h.logger.Info().Msg("Hub shutdown complete")
 }
 
 func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 	if h.shuttingDown.Load() {
-		h.logger.Warn().Str("client_id", client.ID).Msg("Rejecting registration during shutdown")
-		client.SendError(5000, "Server is shutting down")
+		client.SendError(5000, "server is shutting down")
 		return
 	}
 	h.logger.Info().Str("client_id", client.ID).Str("room_id", client.RoomID).Msg("Client registering")
@@ -112,21 +103,19 @@ func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 	var lr *LocalRoom
 	val, ok := h.rooms.Load(client.RoomID)
 	if !ok {
-		// First client in this room on this server instance
 		lr = &LocalRoom{
 			RoomID:  client.RoomID,
 			Clients: make(map[string]*Client),
 		}
 		h.rooms.Store(client.RoomID, lr)
 
-		// Subscribe to NATS for this room (only in multi-instance mode)
 		if h.broker != nil {
 			sub, err := h.broker.SubscribeRoom(client.RoomID, func(data []byte) {
 				h.handleNatsMessage(data)
 			})
 			if err != nil {
 				h.logger.Error().Err(err).Str("room_id", client.RoomID).Msg("Failed to subscribe to NATS for room")
-				client.SendError(5000, "Signaling transport error")
+				client.SendError(5000, "signaling transport error")
 				return
 			}
 			lr.Subscription = sub
@@ -139,17 +128,16 @@ func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 	lr.Clients[client.ID] = client
 	lr.mu.Unlock()
 
-	// Update DB Room member count
-	if err := h.roomService.UpdateMemberCount(ctx, client.RoomID, 1); err != nil {
-		h.logger.Error().Err(err).Str("room_id", client.RoomID).Msg("Failed to increment member count in DB")
-	}
-
-	// Track presence (Redis or in-memory)
-	var peersList []string
+	// Track presence in Redis when available.
 	if h.cache != nil {
 		if err := h.cache.SetPresence(ctx, client.RoomID, client.ID, "online", 24*time.Hour); err != nil {
 			h.logger.Error().Err(err).Str("room_id", client.RoomID).Msg("Failed to set presence in Redis")
 		}
+	}
+
+	// Build peer list for the newly joined client.
+	var peersList []string
+	if h.cache != nil {
 		peersMap, err := h.cache.GetRoomPresence(ctx, client.RoomID)
 		if err == nil {
 			for pID := range peersMap {
@@ -168,7 +156,12 @@ func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 		lr.mu.RUnlock()
 	}
 
-	// Send current room state to the newly joined client
+	// Send room state to the joining client only once (auth ack + room-state combined).
+	client.SendJSON(&SignalMessage{
+		Type:    TypeAuth,
+		Success: true,
+		RoomID:  client.RoomID,
+	})
 	client.SendJSON(&SignalMessage{
 		Type:      TypeRoomState,
 		RoomID:    client.RoomID,
@@ -176,17 +169,7 @@ func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 		PeerCount: len(peersList) + 1,
 	})
 
-	// Broadcast peer-joined to all nodes (only in multi-instance mode)
-	if h.broker != nil {
-		h.publishToNats(&SignalMessage{
-			Type:      TypePeerJoined,
-			RoomID:    client.RoomID,
-			PeerID:    client.ID,
-			PeerCount: len(peersList) + 1,
-		})
-	}
-
-	// Notify local peers directly (always, even without NATS)
+	// Notify existing local peers about the new arrival.
 	lr.mu.RLock()
 	for _, p := range lr.Clients {
 		if p.ID != client.ID {
@@ -199,6 +182,16 @@ func (h *Hub) handleRegister(ctx context.Context, client *Client) {
 		}
 	}
 	lr.mu.RUnlock()
+
+	// Propagate join event to other Hub instances via NATS.
+	if h.broker != nil {
+		h.publishToNats(&SignalMessage{
+			Type:      TypePeerJoined,
+			RoomID:    client.RoomID,
+			PeerID:    client.ID,
+			PeerCount: len(peersList) + 1,
+		})
+	}
 }
 
 func (h *Hub) handleUnregister(ctx context.Context, client *Client) {
@@ -216,45 +209,40 @@ func (h *Hub) handleUnregister(ctx context.Context, client *Client) {
 	delete(lr.Clients, client.ID)
 	client.closed.Store(true)
 	close(client.Send)
-	isEmpty := len(lr.Clients) == 0
+	remaining := len(lr.Clients)
+	isEmpty := remaining == 0
 	lr.mu.Unlock()
 
 	h.logger.Info().Str("client_id", client.ID).Str("room_id", client.RoomID).Msg("Client unregistered")
 
-	// Update DB Room member count
-	if err := h.roomService.UpdateMemberCount(ctx, client.RoomID, -1); err != nil {
-		h.logger.Error().Err(err).Str("room_id", client.RoomID).Msg("Failed to decrement member count in DB")
-	}
-
-	// Update presence cache (optional)
 	if h.cache != nil {
 		_ = h.cache.RemovePresence(ctx, client.RoomID, client.ID)
 	}
 
-	// Notify other connected peers about departure
+	// Notify remaining peers — capture slice under lock so count is consistent.
 	lr.mu.RLock()
-	remainingPeers := make([]*Client, 0, len(lr.Clients))
+	remaining = len(lr.Clients) // re-read after release + re-lock
+	peers := make([]*Client, 0, remaining)
 	for _, p := range lr.Clients {
-		remainingPeers = append(remainingPeers, p)
+		peers = append(peers, p)
 	}
 	lr.mu.RUnlock()
 
-	for _, p := range remainingPeers {
+	for _, p := range peers {
 		p.SendJSON(&SignalMessage{
 			Type:      TypePeerLeft,
 			RoomID:    client.RoomID,
 			PeerID:    client.ID,
-			PeerCount: len(remainingPeers),
+			PeerCount: len(peers),
 		})
 	}
 
-	// Publish to NATS (optional)
 	if h.broker != nil {
 		h.publishToNats(&SignalMessage{
 			Type:      TypePeerLeft,
 			RoomID:    client.RoomID,
 			PeerID:    client.ID,
-			PeerCount: len(remainingPeers),
+			PeerCount: len(peers),
 		})
 	}
 
@@ -263,12 +251,11 @@ func (h *Hub) handleUnregister(ctx context.Context, client *Client) {
 			_ = lr.Subscription.Unsubscribe()
 		}
 		h.rooms.Delete(client.RoomID)
-		h.logger.Info().Str("room_id", client.RoomID).Msg("Cleaned up empty room signaling sub")
+		h.logger.Info().Str("room_id", client.RoomID).Msg("Cleaned up empty room")
 	}
 }
 
-func (h *Hub) handleBroadcast(ctx context.Context, msg *SignalMessage) {
-	// For ping, just respond to client directly
+func (h *Hub) handleBroadcast(_ context.Context, msg *SignalMessage) {
 	if msg.Type == TypePing {
 		val, ok := h.rooms.Load(msg.RoomID)
 		if ok {
@@ -283,79 +270,39 @@ func (h *Hub) handleBroadcast(ctx context.Context, msg *SignalMessage) {
 		return
 	}
 
-	// Auth messages: client sends {type:"auth", token:"..."} after WS upgrade.
-	// Token is already validated at upgrade time via WSAuthMiddleware,
-	// so here we just acknowledge and emit room-state to the client.
-	if msg.Type == TypeAuth {
-		val, ok := h.rooms.Load(msg.RoomID)
-		if ok {
-			lr := val.(*LocalRoom)
-			lr.mu.RLock()
-			client, exists := lr.Clients[msg.FromID]
-			// Build peer list excluding current client
-			var peersList []string
-			for pID := range lr.Clients {
-				if pID != msg.FromID {
-					peersList = append(peersList, pID)
-				}
-			}
-			lr.mu.RUnlock()
-			if exists {
-				// 1. Send auth acknowledgement so frontend triggers 'connect' event
-				client.SendJSON(&SignalMessage{
-					Type:    TypeAuth,
-					Success: true,
-					RoomID:  msg.RoomID,
-				})
-				// 2. Send current room state
-				client.SendJSON(&SignalMessage{
-					Type:      TypeRoomState,
-					RoomID:    msg.RoomID,
-					Peers:     peersList,
-					PeerCount: len(peersList) + 1,
-				})
-			}
-		}
+	// Auth messages after WS upgrade are already handled during handleRegister
+	// (the hub sends auth-ack + room-state on register). Duplicate auth messages
+	// from the client are intentionally no-ops here to prevent double room-state delivery.
+	if msg.Type == TypeAuth || msg.Type == TypeJoin || msg.Type == TypeLeave {
 		return
 	}
 
-	// Filter out client-to-server command types — do not relay to peers
-	if msg.Type == TypeJoin || msg.Type == TypeLeave {
-		return
-	}
-
-	// Handle presence update (optional)
-	if msg.Type == TypePresence && h.cache != nil {
-		if err := h.cache.SetPresence(ctx, msg.RoomID, msg.FromID, msg.Status, 24*time.Hour); err != nil {
-			h.logger.Error().Err(err).Msg("Failed to update presence status in Redis")
-		}
-	}
-
-	// Deliver to local peers
 	val, ok := h.rooms.Load(msg.RoomID)
-	if ok {
-		lr := val.(*LocalRoom)
-		lr.mu.RLock()
+	if !ok {
+		return
+	}
+	lr := val.(*LocalRoom)
 
-		if msg.TargetID != "" {
-			// Route to specific peer only (WebRTC offer/answer/ICE/key-exchange)
-			if target, exists := lr.Clients[msg.TargetID]; exists {
-				target.SendJSON(msg)
-			}
-		} else {
-			// Broadcast to all local peers except sender
-			for _, client := range lr.Clients {
-				if client.ID != msg.FromID {
-					client.SendJSON(msg)
-				}
+	lr.mu.RLock()
+	if msg.TargetID != "" {
+		// Unicast: WebRTC offer / answer / ICE / key-exchange.
+		if target, exists := lr.Clients[msg.TargetID]; exists {
+			target.SendJSON(msg)
+		}
+	} else {
+		// Broadcast to all peers except the sender (e.g. presence updates).
+		for _, client := range lr.Clients {
+			if client.ID != msg.FromID {
+				client.SendJSON(msg)
 			}
 		}
-
-		lr.mu.RUnlock()
 	}
+	lr.mu.RUnlock()
 
-	// Publish to NATS for distribution to other nodes (optional)
-	if h.broker != nil {
+	// Publish to NATS for cross-instance delivery.
+	// The natsOrigin flag prevents NATS-received messages from being re-published,
+	// which would create an infinite fanout loop.
+	if h.broker != nil && !msg.NatsOrigin {
 		h.publishToNats(msg)
 	}
 }
@@ -364,34 +311,37 @@ func (h *Hub) publishToNats(msg *SignalMessage) {
 	if h.broker == nil {
 		return
 	}
+	// Mark the message so the receiving hub knows not to re-publish it.
+	msg.NatsOrigin = true
 	data, err := msg.Serialize()
+	msg.NatsOrigin = false // restore so the struct stays clean
 	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to serialize broadcast signal message")
+		h.logger.Error().Err(err).Msg("Failed to serialize message for NATS")
 		return
 	}
-
 	if err := h.broker.PublishRoomMessage(msg.RoomID, data); err != nil {
-		h.logger.Error().Err(err).Str("room_id", msg.RoomID).Msg("Failed to publish room signal to NATS")
+		h.logger.Error().Err(err).Str("room_id", msg.RoomID).Msg("Failed to publish to NATS")
 	}
 }
 
 func (h *Hub) handleNatsMessage(data []byte) {
 	msg, err := Deserialize(data)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to parse signal message from NATS")
+		h.logger.Error().Err(err).Msg("Failed to parse NATS signal message")
 		return
 	}
+	// Mark as NATS-originated so handleBroadcast does not re-publish.
+	msg.NatsOrigin = true
 
 	val, ok := h.rooms.Load(msg.RoomID)
 	if !ok {
-		return // This server instance does not host any clients for this room
+		return
 	}
 	lr := val.(*LocalRoom)
 
 	lr.mu.RLock()
 	defer lr.mu.RUnlock()
 
-	// If targeted to a specific peer, route directly
 	if msg.TargetID != "" {
 		if client, exists := lr.Clients[msg.TargetID]; exists {
 			client.SendJSON(msg)
@@ -399,7 +349,6 @@ func (h *Hub) handleNatsMessage(data []byte) {
 		return
 	}
 
-	// Otherwise broadcast to all clients in the room, except the initiator
 	for _, client := range lr.Clients {
 		if client.ID != msg.FromID {
 			client.SendJSON(msg)

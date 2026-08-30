@@ -1,29 +1,51 @@
 services:
-  # ─── PostgreSQL Database ───
-  postgres:
-    image: postgres:16-alpine
+  # ─── Go Signaling Backend (always runs) ───
+  signaling:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "5433:5432"
+      - "8081:8080"
     environment:
-      POSTGRES_DB: shadowchat
-      POSTGRES_USER: shadow
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shadowsecret}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shadow -d shadowchat"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - PORT=8080
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-in-production}
+      - TURN_URLS=${TURN_URLS:-}
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # ─── Redis Cache ───
+  # ─── Next.js Frontend (always runs) ───
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SIGNALING_URL: ws://localhost:8081/ws
+        NEXT_PUBLIC_API_URL: http://localhost:8081/api/v1
+        NEXT_PUBLIC_API_PORT: "8081"
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    depends_on:
+      signaling:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ─── Redis presence cache (optional — enable with: --profile cache) ───
   redis:
+    profiles: ["cache", "cluster"]
     image: redis:7-alpine
     restart: unless-stopped
     ports:
@@ -41,8 +63,9 @@ services:
         limits:
           memory: 512M
 
-  # ─── NATS JetStream ───
+  # ─── NATS message broker (optional — enable with: --profile cluster) ───
   nats:
+    profiles: ["cluster"]
     image: nats:2.10-alpine
     restart: unless-stopped
     ports:
@@ -59,7 +82,7 @@ services:
         limits:
           memory: 256M
 
-  # ─── Coturn STUN/TURN Server (optional — enable with: docker compose --profile turn up) ───
+  # ─── Coturn STUN/TURN (optional — enable with: --profile turn) ───
   coturn:
     profiles: ["turn"]
     image: coturn/coturn:4.6.2
@@ -73,53 +96,7 @@ services:
       - ./infrastructure/certs:/etc/turn/certs:ro
     restart: unless-stopped
 
-  # ─── Go Signaling Backend ───
-  signaling:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - PORT=8080
-      - REDIS_URL=redis:6379
-      - NATS_URL=nats://nats:4222
-      - DATABASE_URL=postgres://shadow:${POSTGRES_PASSWORD:-shadowsecret}@postgres:5432/shadowchat?sslmode=disable
-      - TURN_SECRET=${TURN_SECRET:-dev-turn-secret-change-in-production}
-      - TURN_URLS=${TURN_URLS:-turn:coturn:3478?transport=udp,turn:coturn:3478?transport=tcp,turns:coturn:5349?transport=tcp}
-      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
-  # ─── Next.js Frontend ───
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_SIGNALING_URL: ws://localhost:8080/ws
-        NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
-    restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-3001}:3000"
-    depends_on:
-      - signaling
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
-  # ─── Nginx Reverse Proxy (optional — enable with: docker compose --profile reverse-proxy up) ───
+  # ─── Nginx Reverse Proxy (optional — enable with: --profile reverse-proxy) ───
   nginx:
     profiles: ["reverse-proxy"]
     image: nginx:alpine
@@ -139,5 +116,4 @@ services:
           memory: 256M
 
 volumes:
-  postgres-data:
   redis-data:

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/paultanay/shadowchat/actions"><img src="https://github.com/paultanay/shadowchat/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.22%2B-blue?style=flat-square" alt="Go Version" /></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25%2B-blue?style=flat-square" alt="Go Version" /></a>
   <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16%2B-black?style=flat-square" alt="Next.js Version" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19%2B-61dafb?style=flat-square" alt="React Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-yellow?style=flat-square" alt="License" /></a>
@@ -76,7 +76,7 @@ shadowchat/
 
 ## 🚀 Local Quickstart (Docker Compose)
 
-The fastest and most robust way to run ShadowChat locally is using Docker Compose. This spins up Nginx, PostgreSQL, Redis, NATS, Coturn, and the Next.js frontend/Go backend services.
+The fastest and most robust way to run ShadowChat locally is using Docker Compose. This spins up PostgreSQL, Redis, NATS, Coturn, and the Next.js frontend/Go backend services.
 
 ### 1. Boot Up Docker Stack
 Ensure **Docker Desktop / Docker Engine** is active, then run:
@@ -85,19 +85,30 @@ docker compose up --build -d
 ```
 
 ### 2. Open ShadowChat
-Open your browser and navigate to **`https://localhost`** (or `https://127.0.0.1`). 
-High-fidelity, self-signed SSL/TLS termination is managed transparently by Nginx. 
+Open your browser and navigate to **`http://localhost:3001`**.  
+The default frontend port is `3001`. If that port is occupied, set a different one:
+```bash
+FRONTEND_PORT=3002 docker compose up --build -d
+```
 
 > [!NOTE]
-> Since we use self-signed certificates for secure local TLS, your browser will show a standard certificate warning. You can safely proceed/bypass it.
+> The first build may take several minutes to download Go/Node dependencies and compile both the backend and frontend.
+
+### With Nginx Reverse Proxy (HTTPS)
+If you need TLS termination and custom domains, enable the `reverse-proxy` profile:
+```bash
+docker compose --profile reverse-proxy up --build -d
+```
+Then navigate to **`https://localhost`** (or `https://127.0.0.1`).  
+Self-signed certificates are included — your browser will show a security warning; you can safely proceed.
 
 ### Optional: Custom DNS Mapping
-If you prefer using custom local domains instead of `localhost`, add the following to your system hosts file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`):
+For custom local domains instead of `localhost`, add to your hosts file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`):
 ```text
 127.0.0.1 shadowchat.local
 127.0.0.1 api.shadowchat.local
 ```
-Then navigate to `https://shadowchat.local`.
+Then run with the reverse-proxy profile and navigate to **`https://shadowchat.local`**.
 
 ---
 
@@ -116,8 +127,8 @@ failed SASL auth: FATAL: password authentication failed for user "shadow" (SQLST
 ### Fix Option A: Run strictly via Docker (Recommended)
 Stop running `go run` on the host OS. Ensure all services boot and talk securely within the Docker virtual network.
 ```bash
-docker-compose down
-docker-compose up --build -d
+docker compose down
+docker compose up --build -d
 ```
 
 ### Fix Option B: Configure local Environment Secrets

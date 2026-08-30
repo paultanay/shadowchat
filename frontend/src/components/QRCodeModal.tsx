@@ -20,7 +20,7 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
 
   useEffect(() => {
     if (!isOpen || !url) return;
-    setQrError(false);
+    let cancelled = false;
 
     QRCode.toDataURL(url, {
       width: 280,
@@ -32,13 +32,19 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
       errorCorrectionLevel: "M",
     })
       .then((dataUrl) => {
-        setQrDataUrl(dataUrl);
-        setQrError(false);
+        if (!cancelled) {
+          setQrDataUrl(dataUrl);
+          setQrError(false);
+        }
       })
       .catch(() => {
-        setQrError(true);
-        setQrDataUrl(null);
+        if (!cancelled) {
+          setQrError(true);
+          setQrDataUrl(null);
+        }
       });
+
+    return () => { cancelled = true; };
   }, [isOpen, url, qrRetry]);
 
   const handleCopyUrl = () => {
@@ -100,6 +106,8 @@ export default function QRCodeModal({ isOpen, onClose, url, roomCode }: QRCodeMo
             <div className="flex items-center justify-center">
               {qrDataUrl ? (
                 <div className="p-3.5 bg-bg-tertiary rounded-2xl border border-border-glass shadow-elegant">
+                  {/* next/image cannot handle data: URLs generated client-side — plain img is intentional here */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={qrDataUrl}
                     alt="Room QR Code"
