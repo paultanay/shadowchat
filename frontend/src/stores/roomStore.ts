@@ -932,11 +932,22 @@ export const useRoomStore = create<RoomState>((set, get) => {
       let anySent = false;
       let firstEnc: { ciphertext: string; iv: string } | null = null;
 
+      // Diagnostic: log the exact state of each peer at send time
+      console.log('[sendChatMessage] peers count:', peers.size, 'text:', text.substring(0, 20));
+      for (const [remoteId, peer] of peers) {
+        console.log(
+          '[sendChatMessage] peer:', remoteId.substring(0, 8),
+          '| status:', peer.status,
+          '| roomKey:', peer.roomKey ? 'SET' : 'NULL',
+          '| controlChannel:', peer.pcManager?.controlChannel?.readyState ?? 'no-channel'
+        );
+      }
+
       for (const [remoteId, peer] of peers) {
         if (peer.roomKey && peer.pcManager?.controlChannel?.readyState === 'open') {
           try {
             const enc = await encryptText(peer.roomKey, text);
-            if (!firstEnc) firstEnc = enc; // Capture once for persistence
+            if (!firstEnc) firstEnc = enc;
             peer.pcManager.controlChannel.send(JSON.stringify({
               type: 'chat',
               text: enc.ciphertext,
@@ -949,8 +960,26 @@ export const useRoomStore = create<RoomState>((set, get) => {
         }
       }
 
+      if (!anySent) {
+        // Tell the user why — don't silently drop
+        const reasons: string[] = [];
+        for (const [, peer] of peers) {
+          if (!peer.roomKey) reasons.push('Key exchange still in progress');
+          else if (peer.pcManager?.controlChannel?.readyState !== 'open')
+            reasons.push(`Channel not open (${peer.pcManager?.controlChannel?.readyState ?? 'null'})`);
+        }
+        const reason = reasons.length > 0 ? reasons[0] : 'No connected peers';
+        console.warn('[sendChatMessage] dropped — reason:', reason);
+        useUIStore.getState().showToast({
+          type: 'warning',
+          title: 'Secure channel not ready',
+          message: reason + '. Please wait a moment and try again.',
+        });
+        return;
+      }
+
       // Persist message to local IndexedDB once — outside the loop
-      if (anySent && firstEnc) {
+      if (firstEnc) {
         try {
           await saveMessage({
             roomId,
