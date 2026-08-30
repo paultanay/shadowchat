@@ -64,7 +64,14 @@ export class PeerConnectionManager {
       iceCandidatePoolSize: 10,
     };
 
-    this.pc = new RTCPeerConnection(config);
+    try {
+      this.pc = new RTCPeerConnection(config);
+    } catch (err) {
+      console.warn('[PeerConnectionManager] Failed to construct RTCPeerConnection with custom iceServers, falling back to public STUN:', err);
+      this.pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+    }
 
     // Track ICE gathering
     this.pc.onicecandidate = (event) => {

@@ -26,9 +26,12 @@ func (h *TurnHandler) GetCredentials(c *fiber.Ctx) error {
 	}
 
 	rawURLs := strings.Split(h.cfg.TurnURLs, ",")
-	turnURLs := make([]string, len(rawURLs))
-	for i, u := range rawURLs {
-		turnURLs[i] = strings.TrimSpace(u)
+	var turnURLs []string
+	for _, u := range rawURLs {
+		trimmed := strings.TrimSpace(u)
+		if trimmed != "" {
+			turnURLs = append(turnURLs, trimmed)
+		}
 	}
 	creds := crypto.GenerateTurnCredentials(h.cfg.TurnSecret, claims.PeerID, 24*time.Hour, turnURLs)
 

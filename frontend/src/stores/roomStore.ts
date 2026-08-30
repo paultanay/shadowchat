@@ -405,7 +405,12 @@ export const useRoomStore = create<RoomState>((set, get) => {
         const turnData = await turnRes.json();
         console.log('[roomStore] TURN credentials received:', turnData);
         const validUrls = (turnData.urls || []).filter(
-          (u: string) => !u.includes('localhost') && !u.includes('127.0.0.1')
+          (u: unknown) =>
+            typeof u === 'string' &&
+            u.trim().length > 0 &&
+            (u.startsWith('stun:') || u.startsWith('turn:') || u.startsWith('turns:')) &&
+            !u.includes('localhost') &&
+            !u.includes('127.0.0.1')
         );
         if (validUrls.length > 0) {
           iceServers = [
