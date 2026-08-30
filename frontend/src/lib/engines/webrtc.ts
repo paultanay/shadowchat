@@ -10,6 +10,7 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'fai
 export interface WebRTCEvents {
   onStateChange: (state: ConnectionState) => void;
   onMessage: (label: string, data: ArrayBuffer | string) => void;
+  onControlChannelOpen?: () => void;
 }
 
 export class PeerConnectionManager {
@@ -63,7 +64,14 @@ export class PeerConnectionManager {
       iceCandidatePoolSize: 10,
     };
 
-    this.pc = new RTCPeerConnection(config);
+    try {
+      this.pc = new RTCPeerConnection(config);
+    } catch (err) {
+      console.warn('[PeerConnectionManager] Failed to construct RTCPeerConnection with custom iceServers, falling back to public STUN:', err);
+      this.pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+    }
 
     // Track ICE gathering
     this.pc.onicecandidate = (event) => {
@@ -100,10 +108,9 @@ export class PeerConnectionManager {
       }
 
       // 3. Initiate SDP offer after all channels are registered.
-      //    ICE candidates are gathered inline so the offer is complete.
+      //    ICE candidates trickle asynchronously via onicecandidate.
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
-      await this.waitForIceGathering();
       this.signaling.send('offer', this.roomId, this.peerId, {
         sdp: offer.sdp,
       });
@@ -127,7 +134,6 @@ export class PeerConnectionManager {
       try {
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
-        await this.waitForIceGathering();
         this.signaling.send('offer', this.roomId, this.peerId, {
           sdp: offer.sdp,
         });
@@ -201,9 +207,14 @@ export class PeerConnectionManager {
 
   private setupControlChannel(dc: RTCDataChannel): void {
     this.controlChannel = dc;
-    dc.onopen = () => {
+    const handleOpen = () => {
       console.log('[PeerConnectionManager] Control channel OPENED for peer:', this.peerId);
+      this.events.onControlChannelOpen?.();
     };
+    dc.onopen = handleOpen;
+    if (dc.readyState === 'open') {
+      handleOpen();
+    }
     dc.onclose = () => {
       console.log('[PeerConnectionManager] Control channel CLOSED for peer:', this.peerId);
     };
