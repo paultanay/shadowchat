@@ -101,10 +101,9 @@ export class PeerConnectionManager {
       }
 
       // 3. Initiate SDP offer after all channels are registered.
-      //    ICE candidates are gathered inline so the offer is complete.
+      //    ICE candidates trickle asynchronously via onicecandidate.
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
-      await this.waitForIceGathering();
       this.signaling.send('offer', this.roomId, this.peerId, {
         sdp: offer.sdp,
       });
@@ -128,7 +127,6 @@ export class PeerConnectionManager {
       try {
         const offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
-        await this.waitForIceGathering();
         this.signaling.send('offer', this.roomId, this.peerId, {
           sdp: offer.sdp,
         });

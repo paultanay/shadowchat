@@ -852,10 +852,19 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
         client.on('offer', async ({ from, sdp }) => {
           console.log('[roomStore] offer from:', from);
+          let peer = get().peers.get(from);
+          if (!peer) {
+            const currentPeerId = get().peerId;
+            if (currentPeerId) {
+              const isInitiator = currentPeerId < from;
+              console.log('[roomStore] auto-setting up WebRTC peer on incoming offer:', from);
+              await setupWebRTCPeer(from, isInitiator);
+            }
+          }
           queueOrExecuteSignaling(from, async () => {
-            const peer = get().peers.get(from);
-            if (peer?.pcManager) {
-              await peer.pcManager.handleOffer(sdp);
+            const currentPeer = get().peers.get(from);
+            if (currentPeer?.pcManager) {
+              await currentPeer.pcManager.handleOffer(sdp);
             }
           });
         });
