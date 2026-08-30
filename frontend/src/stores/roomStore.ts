@@ -28,13 +28,12 @@ export const getApiBase = () => {
     const host = window.location.host;
     const protocol = window.location.protocol;
     if (host.includes('localhost') || host.includes('127.0.0.1')) {
-      if (host.includes(':3000') || host.includes(':3001')) {
-        return `${protocol}//${window.location.hostname}:8080/api/v1`;
-      }
-      return `${protocol}//${host}/api/v1`;
+      const apiPort = process.env.NEXT_PUBLIC_API_PORT ?? '8081';
+      return `${protocol}//${window.location.hostname}:${apiPort}/api/v1`;
     }
+    return `${protocol}//${host}/api/v1`;
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081/api/v1';
 };
 
 export interface Peer {
@@ -64,7 +63,13 @@ interface RoomState {
   roomId: string | null;
   roomCode: string | null;
   roomRole: 'owner' | 'member' | null;
-  roomConfig: any | null;
+  roomConfig: {
+    is_locked?: boolean;
+    max_members?: number;
+    encrypted_name?: string;
+    encrypted_config?: string;
+    [key: string]: unknown;
+  } | null;
   token: string | null;
   peerId: string | null;
   
@@ -135,12 +140,9 @@ const pendingSignalingMessages = new Map<string, Array<() => Promise<void> | voi
 
 const queueOrExecuteSignaling = (peerId: string, action: () => Promise<void> | void) => {
   const peer = useRoomStore.getState().peers.get(peerId);
-  // We can execute if the peer is fully set up (i.e. pcManager is not null)
   if (peer && peer.pcManager) {
-    console.log(`[Signaling Queue] Instantly executing packet for peer: ${peerId}`);
     action();
   } else {
-    console.log(`[Signaling Queue] Queueing packet for peer: ${peerId}`);
     if (!pendingSignalingMessages.has(peerId)) {
       pendingSignalingMessages.set(peerId, []);
     }
@@ -148,16 +150,20 @@ const queueOrExecuteSignaling = (peerId: string, action: () => Promise<void> | v
   }
 };
 
+// Discard queued messages for a peer that has disconnected to prevent memory leaks.
+const drainSignalingQueue = (peerId: string): void => {
+  pendingSignalingMessages.delete(peerId);
+};
+
 const flushSignalingQueue = async (peerId: string) => {
   const actions = pendingSignalingMessages.get(peerId);
   if (actions) {
     pendingSignalingMessages.delete(peerId);
-    console.log(`[Signaling Queue] Flushing ${actions.length} queued signaling packets for peer: ${peerId}`);
     for (const action of actions) {
       try {
         await action();
       } catch (err) {
-        console.error(`[Signaling Queue] Error processing queued action for peer ${peerId}:`, err);
+        console.error(`[roomStore] Queued signaling action failed for peer ${peerId}:`, err);
       }
     }
   }
@@ -167,16 +173,19 @@ export const useRoomStore = create<RoomState>((set, get) => {
   // Local function to spin up direct peer WebRTC connection
   const setupWebRTCPeer = async (remotePeerId: string, isInitiator: boolean) => {
     const { roomId, token, signaling, localX25519Pair, localEd25519Pair } = get();
-    if (!roomId || !token || !signaling || !localX25519Pair || !localEd25519Pair) return;
-
-    // Guard: check if setup is already in progress or completed
-    if (get().peers.has(remotePeerId)) {
-      console.log(`[setupWebRTCPeer] Setup already in progress or completed for peer: ${remotePeerId}. Ignoring.`);
+    console.log('[roomStore] setupWebRTCPeer:', remotePeerId, 'isInitiator:', isInitiator);
+    if (!roomId || !token || !signaling || !localX25519Pair || !localEd25519Pair) {
+      console.warn('[roomStore] setupWebRTCPeer missing requirements');
       return;
     }
 
-    // Synchronously set a placeholder to prevent concurrent setup race conditions
-    console.log(`[setupWebRTCPeer] Synchronously initializing placeholder for peer: ${remotePeerId}, isInitiator: ${isInitiator}`);
+    // Guard: skip if setup is already in progress or completed for this peer.
+    if (get().peers.has(remotePeerId)) {
+      console.log('[roomStore] setupWebRTCPeer already exists for:', remotePeerId);
+      return;
+    }
+
+    // Synchronously set a placeholder to prevent concurrent setup race.
     set((s) => {
       const updatedPeers = new Map(s.peers);
       updatedPeers.set(remotePeerId, {
@@ -203,6 +212,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       clearTimeout(turnTimeout);
       if (turnRes.ok) {
         const turnData = await turnRes.json();
+        console.log('[roomStore] TURN credentials received:', turnData);
         const validUrls = (turnData.urls || []).filter(
           (u: string) => !u.includes('localhost') && !u.includes('127.0.0.1')
         );
@@ -216,9 +226,11 @@ export const useRoomStore = create<RoomState>((set, get) => {
             }
           ];
         }
+      } else {
+        console.warn('[roomStore] TURN credentials fetch failed:', turnRes.status);
       }
     } catch (err) {
-      console.warn("Failed to gather TURN credentials, falling back to public STUN:", err);
+      console.warn("[roomStore] Failed to gather TURN credentials, falling back to public STUN:", err);
     }
 
     // 2. Instantiate connection manager
@@ -234,9 +246,13 @@ export const useRoomStore = create<RoomState>((set, get) => {
             const updatedPeers = new Map(s.peers);
             const peer = updatedPeers.get(remotePeerId);
             if (peer) {
-              if (state === 'connected') peer.status = 'connected';
-              else if (state === 'failed') peer.status = 'failed';
-              else if (state === 'closed' || state === 'disconnected') {
+              if (state === 'connected') {
+                peer.status = 'connected';
+              } else if (state === 'failed') {
+                peer.status = 'failed';
+                drainSignalingQueue(remotePeerId);
+              } else if (state === 'closed' || state === 'disconnected') {
+                drainSignalingQueue(remotePeerId);
                 updatedPeers.delete(remotePeerId);
               }
               return { peers: updatedPeers };
@@ -356,7 +372,6 @@ export const useRoomStore = create<RoomState>((set, get) => {
       return { peers: updatedPeers };
     });
 
-    console.log(`[setupWebRTCPeer] Initializing pcManager for peer: ${remotePeerId}`);
     await pcManager.initialize();
 
     // 3. Immediately exchange signed Curve25519 identity keys via signaling client
@@ -529,7 +544,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         const client = new SignalingClient(roomId, token);
 
         client.on('connect', () => {
-          set({ signalingState: 'connected' });
+          set({ signaling: client, signalingState: 'connected' });
           useUIStore.getState().showToast({
             type: 'success',
             title: 'Connected',
@@ -550,6 +565,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
         client.on('peer-joined', ({ peerId: remotePeerId }) => {
           const currentPeerId = get().peerId;
+          console.log('[roomStore] peer-joined:', remotePeerId);
           if (remotePeerId !== currentPeerId) {
             useUIStore.getState().showToast({
               type: 'info',
@@ -563,6 +579,9 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('peer-left', ({ peerId: remotePeerId }) => {
+          console.log('[roomStore] peer-left:', remotePeerId);
+          // Discard any queued signaling actions for this peer to prevent leaks.
+          drainSignalingQueue(remotePeerId);
           set((s) => {
             const updatedPeers = new Map(s.peers);
             const peer = updatedPeers.get(remotePeerId);
@@ -582,6 +601,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('room-state', ({ peers: peerList }) => {
+          console.log('[roomStore] room-state:', peerList);
           const currentPeerId = get().peerId;
           peerList.forEach((pid) => {
             if (pid !== currentPeerId && !get().peers.has(pid)) {
@@ -593,6 +613,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('offer', async ({ from, sdp }) => {
+          console.log('[roomStore] offer from:', from);
           queueOrExecuteSignaling(from, async () => {
             const peer = get().peers.get(from);
             if (peer?.pcManager) {
@@ -602,6 +623,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('answer', async ({ from, sdp }) => {
+          console.log('[roomStore] answer from:', from);
           queueOrExecuteSignaling(from, async () => {
             const peer = get().peers.get(from);
             if (peer?.pcManager) {
@@ -611,6 +633,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('ice', async ({ from, candidate }) => {
+          console.log('[roomStore] ice from:', from);
           queueOrExecuteSignaling(from, async () => {
             const peer = get().peers.get(from);
             if (peer?.pcManager) {
@@ -620,17 +643,23 @@ export const useRoomStore = create<RoomState>((set, get) => {
         });
 
         client.on('key-exchange', async ({ from, payload }) => {
+          console.log('[roomStore] key-exchange from:', from);
           queueOrExecuteSignaling(from, async () => {
             const { localX25519Pair } = get();
-            if (!localX25519Pair) return;
+            if (!localX25519Pair) {
+              console.warn('[roomStore] key-exchange: no localX25519Pair');
+              return;
+            }
 
             try {
               const packet: KeyExchangePacket = JSON.parse(payload);
+              console.log('[roomStore] Completing key exchange for:', from);
               const derivedRoomKey = await completeKeyExchange(
                 localX25519Pair.privateKey,
                 packet,
                 roomId
               );
+              console.log('[roomStore] Key exchange completed for:', from);
 
               set((s) => {
                 const updatedPeers = new Map(s.peers);
@@ -762,18 +791,27 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 return { peers: updatedPeers };
               });
 
-              // Send recent history to the newly connected peer
+              // Send recent history to the newly connected peer.
+              // The control channel may not be 'open' yet at the exact moment
+              // of key-exchange completion, so we retry a few times.
               const currentMessages = get().messages;
               if (currentMessages.length > 0) {
                 const recentMessages = currentMessages.slice(-50);
-                const historyBundle = {
+                const historyBundle = JSON.stringify({
                   type: 'history-bundle',
                   messages: recentMessages,
+                });
+                let attempts = 0;
+                const trySend = () => {
+                  const peerObj = get().peers.get(from);
+                  if (peerObj?.pcManager?.controlChannel?.readyState === 'open') {
+                    peerObj.pcManager.controlChannel.send(historyBundle);
+                  } else if (attempts < 10) {
+                    attempts++;
+                    setTimeout(trySend, 150);
+                  }
                 };
-                const peerObj = get().peers.get(from);
-                if (peerObj?.pcManager?.controlChannel?.readyState === 'open') {
-                  peerObj.pcManager.controlChannel.send(JSON.stringify(historyBundle));
-                }
+                trySend();
               }
 
               // Load persisted history only once (messages array is empty)
@@ -836,7 +874,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
             const updatedPeers = new Map(s.peers);
             const peer = updatedPeers.get(from);
             if (peer) {
-              peer.presence = status as any;
+          peer.presence = status as 'online' | 'typing' | 'idle';
             }
             return { peers: updatedPeers };
           });
@@ -888,19 +926,28 @@ export const useRoomStore = create<RoomState>((set, get) => {
       const timestamp = Date.now();
       const messageId = window.crypto.randomUUID();
 
-      // Broadcast encrypted message to each connected peer
+      // Broadcast encrypted message to each connected peer.
+      // Encryption key is the same shared room key so encrypt once per peer,
+      // but save to IndexedDB only once (outside the loop) to avoid duplicates.
       let anySent = false;
+      let firstEnc: { ciphertext: string; iv: string } | null = null;
+
+      // Diagnostic: log the exact state of each peer at send time
+      console.log('[sendChatMessage] peers count:', peers.size, 'text:', text.substring(0, 20));
+      for (const [remoteId, peer] of peers) {
+        console.log(
+          '[sendChatMessage] peer:', remoteId.substring(0, 8),
+          '| status:', peer.status,
+          '| roomKey:', peer.roomKey ? 'SET' : 'NULL',
+          '| controlChannel:', peer.pcManager?.controlChannel?.readyState ?? 'no-channel'
+        );
+      }
+
       for (const [remoteId, peer] of peers) {
         if (peer.roomKey && peer.pcManager?.controlChannel?.readyState === 'open') {
           try {
             const enc = await encryptText(peer.roomKey, text);
-            await saveMessage({
-              roomId,
-              peerId,
-              encryptedText: enc.ciphertext,
-              iv: enc.iv,
-              timestamp,
-            });
+            if (!firstEnc) firstEnc = enc;
             peer.pcManager.controlChannel.send(JSON.stringify({
               type: 'chat',
               text: enc.ciphertext,
@@ -913,8 +960,39 @@ export const useRoomStore = create<RoomState>((set, get) => {
         }
       }
 
-      // Prepend chat bubble locally only after successful broadcast attempt
-      if (anySent) {
+      if (!anySent) {
+        // Tell the user why — don't silently drop
+        const reasons: string[] = [];
+        for (const [, peer] of peers) {
+          if (!peer.roomKey) reasons.push('Key exchange still in progress');
+          else if (peer.pcManager?.controlChannel?.readyState !== 'open')
+            reasons.push(`Channel not open (${peer.pcManager?.controlChannel?.readyState ?? 'null'})`);
+        }
+        const reason = reasons.length > 0 ? reasons[0] : 'No connected peers';
+        console.warn('[sendChatMessage] dropped — reason:', reason);
+        useUIStore.getState().showToast({
+          type: 'warning',
+          title: 'Secure channel not ready',
+          message: reason + '. Please wait a moment and try again.',
+        });
+        return;
+      }
+
+      // Persist message to local IndexedDB once — outside the loop
+      if (firstEnc) {
+        try {
+          await saveMessage({
+            roomId,
+            peerId,
+            encryptedText: firstEnc.ciphertext,
+            iv: firstEnc.iv,
+            timestamp,
+          });
+        } catch (err) {
+          console.warn('Failed to persist sent message to IndexedDB:', err);
+        }
+
+        // Add bubble to local UI state
         set((s) => ({
           messages: [
             ...s.messages,
@@ -923,6 +1001,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
         }));
       }
     },
+
 
     // Room controls (Owner only)
     lockRoom: async () => {

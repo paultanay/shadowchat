@@ -92,12 +92,16 @@ export async function completeKeyExchange(
   packet: KeyExchangePacket,
   roomId: string
 ): Promise<CryptoKey> {
+  console.log('[completeKeyExchange] STEP 1: importing remote X25519 public key...');
   const remoteX25519Public = await importX25519PublicKey(packet.x25519Jwk);
+
+  console.log('[completeKeyExchange] STEP 2: importing remote Ed25519 public key...');
   const remoteEd25519Public = await importEd25519PublicKey(packet.ed25519Jwk);
 
   const serializedX25519 = JSON.stringify(packet.x25519Jwk);
   const signatureBytes = base64ToBytes(packet.signature);
 
+  console.log('[completeKeyExchange] STEP 3: verifying Ed25519 identity signature...');
   // 1. Verify signatures to prevent MITM
   const isSignatureValid = await verifySignature(
     remoteEd25519Public,
@@ -105,26 +109,30 @@ export async function completeKeyExchange(
     stringToBuffer(serializedX25519)
   );
 
+  console.log('[completeKeyExchange] signature valid:', isSignatureValid);
   if (!isSignatureValid) {
     throw new Error('Key exchange failed: identity signature verification failed');
   }
 
-  // 2. Perform ECDH key exchange
-  // Derive raw bits from Curve25519 DH exchange
+  console.log('[completeKeyExchange] STEP 4: X25519 DH deriveBits...');
+  // 2. Perform ECDH key exchange — pass 256 for length.
   const rawSharedSecret = await window.crypto.subtle.deriveBits(
     {
       name: 'X25519',
       public: remoteX25519Public,
     },
     localX25519Private,
-    256 // 256 bits
+    256
   );
 
+  console.log('[completeKeyExchange] STEP 5: HKDF key derivation, roomId:', roomId);
   // 3. Derive symmetric Room Key using HKDF
-  const salt = new TextEncoder().encode(roomId); // Salt is the Room ID
+  const salt = new TextEncoder().encode(roomId);
   const info = new TextEncoder().encode('shadowchat-v1-room-key');
 
-  return await deriveRoomKey(rawSharedSecret, salt, info);
+  const roomKey = await deriveRoomKey(rawSharedSecret, salt, info);
+  console.log('[completeKeyExchange] DONE: room key derived successfully');
+  return roomKey;
 }
 
 // Generate an ephemeral random key for encrypting a specific file (Envelope Encryption)

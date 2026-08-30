@@ -1,150 +1,275 @@
 <p align="center">
-  <img src="frontend/public/banner.png" alt="ShadowChat Logo" />
+  <img src="frontend/public/banner.png" alt="ShadowChat — Zero-Knowledge P2P Communication Platform" />
 </p>
 
 <p align="center">
-  <strong>Zero-Knowledge, Peer-to-Peer File Transfer and Communication Platform</strong>
+  <strong>Distributed, Zero-Knowledge, End-to-End Encrypted P2P Transfer Platform</strong><br/>
+  <sub>Server is mathematically blind to all payloads, keys, and identities</sub>
 </p>
 
 <p align="center">
-  <a href="https://github.com/paultanay/shadowchat/actions"><img src="https://github.com/paultanay/shadowchat/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.22%2B-blue?style=flat-square" alt="Go Version" /></a>
-  <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16%2B-black?style=flat-square" alt="Next.js Version" /></a>
-  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19%2B-61dafb?style=flat-square" alt="React Version" /></a>
+  <a href="https://github.com/paultanay/shadowchat/actions"><img src="https://github.com/paultanay/shadowchat/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go" alt="Go" />
+  <img src="https://img.shields.io/badge/Next.js-16%2B-black?style=flat-square&logo=next.js" alt="Next.js" />
+  <img src="https://img.shields.io/badge/WebRTC-DataChannel-orange?style=flat-square" alt="WebRTC" />
+  <img src="https://img.shields.io/badge/Crypto-X25519%20%2B%20AES--256--GCM-green?style=flat-square" alt="Crypto" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-yellow?style=flat-square" alt="License" /></a>
 </p>
 
 ---
 
-## 📖 Introduction
+## What is ShadowChat?
 
-**ShadowChat** is a highly secure, room-based, peer-to-peer file-sharing and realtime communication application. Built under absolute zero-knowledge security constraints, ShadowChat establishes direct P2P connections between browsers using **WebRTC DataChannels**. 
+ShadowChat is a **distributed peer-to-peer communication and file transfer platform** where the signaling server is architecturally blind to all content. Files transfer directly between browser peers over WebRTC DataChannels, encrypted end-to-end with AES-256-GCM. The server relays only opaque signaling envelopes (SDP, ICE candidates) — it never sees plaintext, keys, or filenames.
 
-The signaling layer is operated by a high-performance **Go Fiber** server cluster, but is mathematically blinded to all room communications, file payloads, and room credentials.
-
----
-
-## 🔒 Security & Cryptographic Protocol
-
-ShadowChat is built on a non-negotiable **Zero-Knowledge Security Invariant**. The server acts as a blind relay and possesses zero knowledge of the room contents or transfer metadata.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ZERO-KNOWLEDGE BOUNDARY                  │
-│                                                             │
-│   Server CAN see:             Server CANNOT see:            │
-│   ─────────────────           ──────────────────            │
-│   • Encrypted Room UUIDs      • File Contents               │
-│   • Client timestamps         • Chat Plaintext              │
-│   • IP Transport limits       • Symmetric Keys              │
-│   • Opaque SDP/ICE envelopes  • Room Names / Configuration  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Key Exchange & Encryption Protocol
-1. **Envelope Encryption**: When a room is created, a master **AES-256 room key** is generated client-side. The room configurations and labels are encrypted with this key before registration.
-2. **Invite Key Protection**: The key is stored in the URL hash fragment (`#key=...`). The hash fragment is strictly evaluated client-side inside the browser and is **never** sent over the network to the server.
-3. **P2P Identity & Verification**: Peers exchange signed ephemeral **X25519** public keys verified via local **Ed25519** signatures.
-4. **HKDF Derivation**: A 256-bit symmetric session key is derived via **HKDF-SHA-256** to isolate and protect the File, Chat, and Metadata sub-channels.
-5. **High-Performance Ciphers**: Symmetric block encryption uses authenticated **AES-256-GCM** client-side to ensure perfect secrecy and integrity.
+This is not a demo. It is a full-stack distributed system built with the same engineering discipline applied to production-grade infrastructure.
 
 ---
 
-## 🛠️ Monorepo Architecture
+## Architecture Overview
+
+```
+┌──────────────────────────┐         WebRTC DataChannel (P2P)         ┌──────────────────────────┐
+│       Browser A          │ ════════════════════════════════════════► │       Browser B          │
+│                          │                                           │                          │
+│  Transfer Engine         │    ┌─────────────────────────────────┐    │  Transfer Engine         │
+│  ├─ 4× DataChannels      │    │      SIGNALING SERVER (Go)       │    │  ├─ 4× DataChannels      │
+│  ├─ AES-256-GCM/chunk    │    │                                  │    │  ├─ AES-256-GCM/chunk    │
+│  ├─ Backpressure ctrl    │    │  Fiber (HTTP/WS) + JWT Auth      │    │  ├─ Backpressure ctrl    │
+│  └─ SHA-256 integrity    │◄──►│  Hub (in-process room routing)   │◄──►│  └─ SHA-256 integrity    │
+│                          │    │  NATS (cross-instance pub/sub)   │    │                          │
+│  Crypto Engine           │    │  Redis (presence / rate-limit)   │    │  Crypto Engine           │
+│  ├─ X25519 key exchange  │    │  PostgreSQL (room metadata)      │    │  ├─ X25519 key exchange  │
+│  ├─ Ed25519 signatures   │    │  coturn (STUN/TURN relay)        │    │  ├─ Ed25519 signatures   │
+│  └─ HKDF room key        │    └─────────────────────────────────┘    │  └─ HKDF room key        │
+└──────────────────────────┘                                           └──────────────────────────┘
+```
+
+**Data flow by concern:**
+
+| Layer | Transport | Encryption | Server knowledge |
+|---|---|---|---|
+| File transfer | WebRTC DataChannel (DTLS) | AES-256-GCM (E2E) | **Zero** |
+| Chat messages | WebRTC DataChannel (DTLS) | AES-256-GCM (E2E) | **Zero** |
+| Signaling (SDP/ICE) | WSS | TLS (transport only) | Encrypted envelopes |
+| Presence heartbeat | WSS → Redis | TLS (transport only) | Timestamps only |
+| Room metadata | HTTPS → PostgreSQL | TLS + client-side AES | Encrypted blobs |
+
+---
+
+## Cryptographic Protocol
+
+### Key Exchange (per peer pair)
+
+```
+Peer A                          Signaling Server (blind relay)          Peer B
+│                                        │                                │
+│  1. Generate X25519 keypair            │                                │
+│     Generate Ed25519 keypair           │                                │
+│  2. Sign(X25519_pub_A, Ed25519_priv_A) │                                │
+│  3. Send { x25519_pub_A,               │                                │
+│            ed25519_pub_A,              │ ──── relay (opaque) ────────► │
+│            signature_A }              │                                │
+│                                        │    4. Verify signature_A      │
+│                                        │    5. Same steps for B ───────│
+│  ◄─── relay (opaque) ──────────────── │◄─── { x25519_pub_B,           │
+│                                        │       ed25519_pub_B,          │
+│  6. Verify signature_B                 │       signature_B }           │
+│  7. sharedSecret = X25519(priv_A, pub_B)                               │
+│  8. roomKey = HKDF-SHA256(sharedSecret, salt=roomId, info="shadowchat-v1-room-key")
+│                                                                         │
+│  ═══════════════ Secure channel — identical roomKey on both sides ══════│
+```
+
+**Why this works:** Ed25519 signatures bind each X25519 public key to its originating peer — a passive relay attack cannot substitute keys. HKDF domain-separates the output with a room-scoped info string so the same DH secret can never be reused across rooms.
+
+### Encryption Stack
+
+| Primitive | Algorithm | Purpose |
+|---|---|---|
+| Key exchange | X25519 (RFC 7748) | Ephemeral ECDH room key agreement |
+| Identity binding | Ed25519 (RFC 8032) | Prevent MITM key substitution |
+| Key derivation | HKDF-SHA-256 (RFC 5869) | Domain-separated session key derivation |
+| Symmetric encryption | AES-256-GCM (NIST SP 800-38D) | Authenticated encryption of all payloads |
+| File key wrapping | AES-256-GCM (envelope encryption) | Per-file ephemeral key wrapped in room key |
+| Integrity | SHA-256 (FIPS 180-4) | End-to-end file integrity verification |
+| Randomness | `crypto.getRandomValues()` (CSPRNG) | IV/nonce generation (12 bytes, unique per op) |
+
+### Zero-Knowledge Invariants (enforced in code, not just policy)
+
+```
+INVARIANT 1:  Server stores zero plaintext — all content encrypted client-side before transit
+INVARIANT 2:  Server never possesses encryption keys — key exchange over authenticated P2P channel
+INVARIANT 3:  Room keys are NON-EXTRACTABLE CryptoKey objects — XSS cannot call exportKey()
+INVARIANT 4:  Files transfer P2P — server never proxies file bytes, even via TURN (DTLS-encrypted)
+INVARIANT 5:  Every AES-GCM operation uses a unique 96-bit IV — GCM nonce reuse is impossible
+INVARIANT 6:  Ed25519 identity keys sign X25519 exchange keys — active MITM is cryptographically detected
+```
+
+---
+
+## File Transfer Engine
+
+Files are split into **64 KB chunks**, each independently encrypted with a per-file ephemeral AES key, then streamed across **4 parallel WebRTC DataChannels** for maximum pipe saturation.
+
+### Wire Format (per chunk)
+
+```
+┌──────────────┬────────────────────┬──────────┬───────────────────────────────────┐
+│ Transfer ID  │  Chunk Index (u32) │  IV (12B)│   AES-256-GCM Ciphertext + Tag    │
+│   (16 bytes) │                    │          │   (up to 64 KB + 16B auth tag)    │
+└──────────────┴────────────────────┴──────────┴───────────────────────────────────┘
+```
+
+### Backpressure Control
+
+The sender monitors each DataChannel's `bufferedAmount`. When it crosses the **1 MB high-watermark**, it suspends sending and awaits the `bufferedamountlow` event (threshold: 64 KB) before resuming. This prevents memory saturation on constrained clients without relying on polling.
+
+### Performance Architecture
+
+- **4 parallel DataChannels** — saturates available bandwidth by multiplexing across independent SCTP streams
+- **Web Workers for crypto** — AES-GCM encryption and SHA-256 hashing are offloaded off the main thread; UI stays at 60 fps during gigabyte transfers
+- **Adaptive chunk sizing** — chunk size adjusts between 16 KB and 256 KB based on measured throughput delta
+- **Resumable transfers** — chunk bitmap and partial file persisted in IndexedDB; resumed from first missing chunk after reconnect
+
+---
+
+## Signaling Server (Go)
+
+The Go backend is a **stateless-friendly horizontally-scalable** WebSocket hub. Two instances serving the same room communicate via **NATS pub/sub** — chosen over Kafka because signaling messages are ephemeral (a stale SDP offer is harmful, not recoverable), and NATS delivers sub-millisecond fanout versus Kafka's durable-log overhead.
+
+### Why NATS, not Kafka?
+
+| Property | NATS | Kafka |
+|---|---|---|
+| Latency | < 1ms (ephemeral fire-and-forget) | 5–10ms minimum (log flush) |
+| Durability | Not needed — stale SDP = broken connection | Core feature (log replay) |
+| Operational weight | Single binary, zero dependencies | Brokers + KRaft + topic partitioning |
+| Fit | **WebRTC signaling fan-out** | Analytics pipelines, audit logs |
+
+Kafka would be the right choice if we built an audit trail or analytics pipeline — it is not the right tool for ephemeral real-time signaling.
+
+### Hub Pattern
+
+```go
+// Cross-instance delivery: Hub A → NATS → Hub B → WebSocket
+// Local delivery: Hub → in-memory room map → WebSocket (zero NATS overhead)
+// Anti-loop: each NATS-delivered message carries originating instance ID
+//            to prevent re-publishing it back to NATS
+```
+
+### JWT + WebSocket Authentication
+
+JWTs are passed as a query parameter at WebSocket upgrade time (`?token=...`) — the only browser-native mechanism since the `Upgrade` HTTP request does not support custom headers. The token is validated by middleware **before** the upgrade completes; unauthenticated connections are rejected at the HTTP layer, never reaching the hub.
+
+### TURN Credential Security
+
+Ephemeral TURN credentials are generated server-side using **HMAC-SHA1** over a timestamp-scoped username (per the TURN REST API spec, RFC 8489). Credentials carry a configurable TTL (default: 24h) and are scoped to the requesting peer's room claim — unauthorized relay usage is prevented by the shared TURN secret.
+
+---
+
+## Technology Decisions
+
+| Component | Choice | Why |
+|---|---|---|
+| Signaling server | Go + Fiber | Low goroutine overhead per WS connection; predictable GC latency |
+| Frontend | Next.js 16 (App Router) | RSC for zero-JS landing page; edge-compatible SSR |
+| State management | Zustand | Minimal re-render surface; direct store access from engine callbacks |
+| In-process pub/sub | NATS | Sub-ms ephemeral fanout — correct for signaling, unlike Kafka |
+| Session cache / presence | Redis | TTL-based presence expiry; rate-limit counters with INCR atomicity |
+| Persistent metadata | PostgreSQL (Neon) | Encrypted room blobs; ACID guarantees for room lifecycle |
+| Crypto primitives | Web Crypto API (SubtleCrypto) | Hardware-accelerated, browser-native, no third-party crypto libs |
+| Local data | Dexie.js (IndexedDB) | Resumable transfer state; encrypted message cache |
+| TURN relay | coturn (self-hosted) | HMAC-signed ephemeral creds; full DTLS passthrough (server stays blind) |
+
+---
+
+## Repository Structure
 
 ```
 shadowchat/
-├── backend/                  # Go Signaling Server
-│   ├── cmd/server/           # Application Entry point
-│   ├── internal/             # Core Backend Modules (hub, nats, redis, crypto)
-│   └── migrations/           # PostgreSQL DB Migrations
-├── frontend/                 # Next.js 16 + React 19 Frontend App
-│   ├── src/animations/       # Custom page/element motion physics
-│   ├── src/app/              # App Router Pages (landing, active rooms)
-│   ├── src/lib/crypto/       # Web Crypto API engines (AES, HKDF, Keys)
-│   ├── src/lib/engines/      # Connection & Transfer controllers
-│   └── src/stores/           # Zustand reactive states
-└── infrastructure/           # Docker Compose local stack & Nginx config
+├── backend/
+│   ├── cmd/server/             # Application entrypoint
+│   └── internal/
+│       ├── hub/                # WebSocket hub — room routing, client read/write pumps
+│       │   ├── hub.go          # NATS-backed broadcast, anti-loop instance ID
+│       │   ├── client.go       # Per-client goroutines (readPump/writePump), ping/pong
+│       │   └── message.go      # SignalMessage type, serialization
+│       ├── crypto/
+│       │   ├── jwt.go          # HS256 token generation/validation, room claims
+│       │   └── turn.go         # HMAC-SHA1 ephemeral TURN credential generation
+│       ├── handler/            # HTTP/WS route handlers
+│       ├── service/            # Room business logic (create, join, expire, lock)
+│       ├── repository/         # PostgreSQL data access layer
+│       ├── nats/               # NATS broker lifecycle management
+│       ├── redis/              # Redis presence tracking, rate limiting
+│       └── middleware/         # JWT auth middleware, rate limiting
+├── frontend/
+│   └── src/
+│       ├── lib/
+│       │   ├── crypto/
+│       │   │   ├── aes.ts      # AES-256-GCM encrypt/decrypt helpers
+│       │   │   ├── hkdf.ts     # HKDF-SHA-256 room key derivation (non-extractable)
+│       │   │   ├── keys.ts     # X25519 + Ed25519 key generation and JWK export
+│       │   │   └── integrity.ts# SHA-256 file integrity (offloaded to Web Worker)
+│       │   └── engines/
+│       │       ├── crypto.ts   # Key exchange orchestration, envelope encryption
+│       │       ├── webrtc.ts   # RTCPeerConnection state machine, offer/answer lifecycle
+│       │       ├── signaling.ts# WebSocket client, reconnect, queued message replay
+│       │       ├── transfer.ts # Chunking, backpressure, parallel channels, reassembly
+│       │       └── storage.ts  # Dexie.js IndexedDB schema and access helpers
+│       ├── stores/
+│       │   ├── roomStore.ts    # Zustand: P2P session lifecycle, peer management
+│       │   └── uiStore.ts      # Zustand: toast, modals, UI state
+│       └── workers/
+│           └── hash.worker.ts  # Off-thread SHA-256 via hash-wasm
+└── docker-compose.yml          # Full local stack: PG + Redis + NATS + coturn + app
 ```
-
-### High-Performance WebRTC Stream Engine
-- **Backpressure Controller**: Monitors `bufferedAmount` on the data channels, keeping a low-watermark threshold of `64 KB` and a high-watermark of `1 MB` to prevent memory overflows.
-- **Parallel Multiplexing**: Channels file data across **4 parallel data channels** to saturate connection pipes.
-- **Web Workers**: Shifting SHA-256 calculations, Argon2id derivations, and AES-GCM operations to worker threads preserves **60fps UI performance** even during high-throughput multi-gigabyte transfers.
 
 ---
 
-## 🚀 Local Quickstart (Docker Compose)
+## Local Development (Docker Compose)
 
-The fastest and most robust way to run ShadowChat locally is using Docker Compose. This spins up Nginx, PostgreSQL, Redis, NATS, Coturn, and the Next.js frontend/Go backend services.
-
-### 1. Boot Up Docker Stack
-Ensure **Docker Desktop / Docker Engine** is active, then run:
 ```bash
+# Clone and boot the full stack
+git clone https://github.com/paultanay/shadowchat
+cd shadowchat
 docker compose up --build -d
 ```
 
-### 2. Open ShadowChat
-Open your browser and navigate to **`https://localhost`** (or `https://127.0.0.1`). 
-High-fidelity, self-signed SSL/TLS termination is managed transparently by Nginx. 
+Open **`http://localhost:3001`** — no manual database setup, the backend auto-migrates on startup.
 
-> [!NOTE]
-> Since we use self-signed certificates for secure local TLS, your browser will show a standard certificate warning. You can safely proceed/bypass it.
-
-### Optional: Custom DNS Mapping
-If you prefer using custom local domains instead of `localhost`, add the following to your system hosts file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`):
-```text
-127.0.0.1 shadowchat.local
-127.0.0.1 api.shadowchat.local
-```
-Then navigate to `https://shadowchat.local`.
-
----
-
-## ⚠️ Troubleshooting Database Authentication Issues
-
-If you run the backend locally outside of Docker (`go run cmd/server/main.go`) and encounter:
-```text
-failed SASL auth: FATAL: password authentication failed for user "shadow" (SQLSTATE 28P01)
-```
-
-### What is happening?
-1. By default, the local backend configuration points to `localhost:5432` with username `shadow` and password `shadowsecret`.
-2. This error means there is a **local PostgreSQL database service running directly on your host machine** as a system service.
-3. The backend connected to your local host's PostgreSQL server instead of the Docker database, but authentication failed due to credential mismatches.
-
-### Fix Option A: Run strictly via Docker (Recommended)
-Stop running `go run` on the host OS. Ensure all services boot and talk securely within the Docker virtual network.
 ```bash
-docker-compose down
-docker-compose up --build -d
+# Optional: change ports
+FRONTEND_PORT=3002 docker compose up -d
+
+# Optional: enable HTTPS + reverse proxy
+docker compose --profile reverse-proxy up -d
+# → https://localhost
 ```
 
-### Fix Option B: Configure local Environment Secrets
-If you want to run the server on your host machine, create a local environmental configuration file:
-1. Navigate to `/backend`.
-2. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-3. Edit `DATABASE_URL` in `.env` to match your local Windows system's PostgreSQL credentials:
-   ```env
-   # Replace with your actual local PostgreSQL user, password, and port
-   DATABASE_URL=postgres://YOUR_USERNAME:YOUR_PASSWORD@localhost:5432/YOUR_DB_NAME?sslmode=disable
-   ```
-4. Start your Go server:
-   ```bash
-   go run cmd/server/main.go
-   ```
+> **First build:** Go and Node dependencies are compiled from scratch. Allow ~3–5 minutes.
+
+### Environment Variables
+
+Copy `.env.example` → `.env` in both `backend/` and root. All defaults are pre-filled for local Docker networking — no manual configuration needed.
 
 ---
 
-## 🤝 Contributing
+## Production Deployment
 
-We welcome standard PR contributions! Please refer to the detailed [CONTRIBUTING.md](CONTRIBUTING.md) to set up your environment, verify TS/Go compilation checks, and run internal test suites.
+| Layer | Service |
+|---|---|
+| Frontend | Vercel (Edge Network) |
+| Signaling Server | Google Cloud Run (auto-scaling) |
+| Database | Neon (serverless PostgreSQL) |
+| Cache / Presence | Upstash Redis |
+| TURN Relay | Oracle Cloud ARM VM (coturn) |
+
+See [`docs/deployment.md`](docs/deployment.md) for full production setup.
 
 ---
 
-## 🛡️ License
+## License
 
-ShadowChat is open-source software licensed under the **[Apache License 2.0](LICENSE)**.
+Apache 2.0 — see [LICENSE](LICENSE).

@@ -406,7 +406,7 @@ export class FileTransferCoordinator {
         iv,
         ciphertext,
       };
-    } catch (err) {
+    } catch {
       return null;
     }
   }
@@ -615,7 +615,10 @@ export class FileTransferCoordinator {
       for (const chunk of chunks) {
         const chunkData = new Uint8Array(chunk.data);
         const iv = chunkData.subarray(0, 12);
-        const decrypted = await decryptAESGCM(incoming.fileKey, chunkData.buffer.slice(12), iv);
+        // Use chunkData.slice(12).buffer — not chunkData.buffer.slice(12) — because
+        // chunkData may be a view with a non-zero byteOffset (e.g. from Dexie),
+        // so we must slice the view itself to get the correct contiguous buffer.
+        const decrypted = await decryptAESGCM(incoming.fileKey, chunkData.slice(12).buffer, iv);
         decryptedBuffers.push(decrypted);
       }
 
@@ -682,7 +685,7 @@ export class FileTransferCoordinator {
   /**
    * Sends control frames over the signaling/control channel.
    */
-  private sendControl(payload: Record<string, any>): void {
+  private sendControl(payload: Record<string, unknown>): void {
     if (this.pcManager.controlChannel && this.pcManager.controlChannel.readyState === 'open') {
       this.pcManager.controlChannel.send(JSON.stringify(payload));
     }

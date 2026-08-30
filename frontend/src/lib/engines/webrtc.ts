@@ -46,9 +46,14 @@ export class PeerConnectionManager {
   private async waitForIceGathering(): Promise<void> {
     if (!this.pc || this.pc.iceGatheringState === 'complete') return;
     await new Promise<void>((resolve) => {
-      this.pc!.onicegatheringstatechange = () => {
-        if (this.pc!.iceGatheringState === 'complete') resolve();
+      const handler = () => {
+        if (this.pc && this.pc.iceGatheringState === 'complete') {
+          // Clean up listener immediately to prevent leaks on closed connections.
+          this.pc.onicegatheringstatechange = null;
+          resolve();
+        }
       };
+      this.pc!.onicegatheringstatechange = handler;
     });
   }
 
@@ -73,14 +78,20 @@ export class PeerConnectionManager {
     this.pc.onconnectionstatechange = () => {
       if (!this.pc) return;
       const state = this.pc.connectionState as ConnectionState;
+      console.log('[PeerConnectionManager] Connection state:', state, 'for peer:', this.peerId);
       this.events.onStateChange(state);
     };
 
     if (this.isInitiator) {
+      // Disable onnegotiationneeded during channel setup. Chromium fires it
+      // synchronously when createDataChannel() is called, which would trigger
+      // a duplicate offer before the receiver even has a PeerConnection.
+      this.pc.onnegotiationneeded = null;
+
       // 1. Create Control channel (reliable + ordered)
       this.setupControlChannel(this.pc.createDataChannel('control', { ordered: true }));
 
-      // 2. Create parallel data channels for file chunking (normally 4 channels)
+      // 2. Create parallel data channels for file chunking (4 parallel lanes)
       const parallelChannelsCount = 4;
       for (let i = 0; i < parallelChannelsCount; i++) {
         const label = `data-${i}`;
@@ -88,7 +99,8 @@ export class PeerConnectionManager {
         this.setupDataChannel(dc);
       }
 
-      // 3. Initiate SDP offer after ICE gathering completes
+      // 3. Initiate SDP offer after all channels are registered.
+      //    ICE candidates are gathered inline so the offer is complete.
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
       await this.waitForIceGathering();
@@ -107,7 +119,8 @@ export class PeerConnectionManager {
       };
     }
 
-    // Set onnegotiationneeded AFTER initialize() completes to prevent race
+    // Re-enable negotiationneeded AFTER the initial setup is complete.
+    // This handles ICE restarts and any future re-negotiation needs.
     this.pc.onnegotiationneeded = async () => {
       if (!this.pc || this.pendingOffer || this.restartCount >= this.MAX_RESTARTS) return;
       this.pendingOffer = true;
@@ -188,6 +201,12 @@ export class PeerConnectionManager {
 
   private setupControlChannel(dc: RTCDataChannel): void {
     this.controlChannel = dc;
+    dc.onopen = () => {
+      console.log('[PeerConnectionManager] Control channel OPENED for peer:', this.peerId);
+    };
+    dc.onclose = () => {
+      console.log('[PeerConnectionManager] Control channel CLOSED for peer:', this.peerId);
+    };
     dc.onmessage = (event) => {
       this.events.onMessage(dc.label, event.data);
     };
@@ -196,7 +215,12 @@ export class PeerConnectionManager {
   private setupDataChannel(dc: RTCDataChannel): void {
     dc.binaryType = 'arraybuffer';
     this.dataChannels.set(dc.label, dc);
-    
+    dc.onopen = () => {
+      console.log('[PeerConnectionManager] Data channel OPENED:', dc.label, 'for peer:', this.peerId);
+    };
+    dc.onclose = () => {
+      console.log('[PeerConnectionManager] Data channel CLOSED:', dc.label, 'for peer:', this.peerId);
+    };
     dc.onmessage = (event) => {
       this.events.onMessage(dc.label, event.data);
     };

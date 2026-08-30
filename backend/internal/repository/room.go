@@ -3,14 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
-var (
-	ErrRoomNotFound = errors.New("room not found")
-)
+var ErrRoomNotFound = errors.New("room not found")
 
 type Room struct {
 	ID              string     `json:"id"`
@@ -36,154 +33,133 @@ type RoomRepository interface {
 	DeleteExpired(ctx context.Context) (int64, error)
 }
 
-type PostgresRoomRepository struct {
-	db *DB
+// MemoryRoomRepository is a goroutine-safe in-memory implementation.
+// No data is persisted to disk — all state lives for the process lifetime.
+// This satisfies the zero-knowledge invariant: the server holds only ephemeral
+// signaling metadata and never touches plaintext room content or keys.
+type MemoryRoomRepository struct {
+	mu       sync.RWMutex
+	byID     map[string]*Room
+	byCode   map[string]string // room_code → room id
 }
 
-func NewPostgresRoomRepository(db *DB) RoomRepository {
-	return &PostgresRoomRepository{db: db}
-}
-
-func (r *PostgresRoomRepository) Create(ctx context.Context, room *Room) error {
-	query := `
-		INSERT INTO rooms (
-			id, encrypted_name, encrypted_config, room_code, max_members, 
-			is_locked, is_temporary, expires_at, owner_id
-		) VALUES (
-			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9
-		) RETURNING id, created_at, member_count
-	`
-	var ownerIDParam *string
-	if room.OwnerID != nil && *room.OwnerID != "" {
-		ownerIDParam = room.OwnerID
+func NewMemoryRoomRepository() RoomRepository {
+	repo := &MemoryRoomRepository{
+		byID:   make(map[string]*Room),
+		byCode: make(map[string]string),
 	}
-
-	err := r.db.Pool.QueryRow(ctx, query,
-		room.ID,
-		room.EncryptedName,
-		room.EncryptedConfig,
-		room.RoomCode,
-		room.MaxMembers,
-		room.IsLocked,
-		room.IsTemporary,
-		room.ExpiresAt,
-		ownerIDParam,
-	).Scan(&room.ID, &room.CreatedAt, &room.MemberCount)
-
-	return err
+	go repo.expireLoop()
+	return repo
 }
 
-func (r *PostgresRoomRepository) GetByID(ctx context.Context, id string) (*Room, error) {
-	query := `
-		SELECT id, encrypted_name, encrypted_config, room_code, max_members,
-		       is_locked, is_temporary, created_at, expires_at, owner_id, member_count
-		FROM rooms
-		WHERE id = $1
-	`
-	room := &Room{}
-	var ownerID *string
-
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&room.ID,
-		&room.EncryptedName,
-		&room.EncryptedConfig,
-		&room.RoomCode,
-		&room.MaxMembers,
-		&room.IsLocked,
-		&room.IsTemporary,
-		&room.CreatedAt,
-		&room.ExpiresAt,
-		&ownerID,
-		&room.MemberCount,
-	)
-
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrRoomNotFound
+// expireLoop runs every minute and purges expired rooms.
+func (r *MemoryRoomRepository) expireLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		r.mu.Lock()
+		now := time.Now()
+		for id, room := range r.byID {
+			if room.ExpiresAt != nil && now.After(*room.ExpiresAt) {
+				delete(r.byCode, room.RoomCode)
+				delete(r.byID, id)
+			}
 		}
-		return nil, err
+		r.mu.Unlock()
 	}
-
-	room.OwnerID = ownerID
-	return room, nil
 }
 
-func (r *PostgresRoomRepository) GetByCode(ctx context.Context, code string) (*Room, error) {
-	query := `
-		SELECT id, encrypted_name, encrypted_config, room_code, max_members,
-		       is_locked, is_temporary, created_at, expires_at, owner_id, member_count
-		FROM rooms
-		WHERE room_code = $1
-	`
-	room := &Room{}
-	var ownerID *string
+func (r *MemoryRoomRepository) Create(ctx context.Context, room *Room) error {
+	if room.ID == "" {
+		return errors.New("room id is required")
+	}
+	room.CreatedAt = time.Now()
+	room.MemberCount = 0
 
-	err := r.db.Pool.QueryRow(ctx, query, code).Scan(
-		&room.ID,
-		&room.EncryptedName,
-		&room.EncryptedConfig,
-		&room.RoomCode,
-		&room.MaxMembers,
-		&room.IsLocked,
-		&room.IsTemporary,
-		&room.CreatedAt,
-		&room.ExpiresAt,
-		&ownerID,
-		&room.MemberCount,
-	)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byID[room.ID] = room
+	r.byCode[room.RoomCode] = room.ID
+	return nil
+}
 
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrRoomNotFound
+func (r *MemoryRoomRepository) GetByID(ctx context.Context, id string) (*Room, error) {
+	r.mu.RLock()
+	room, ok := r.byID[id]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, ErrRoomNotFound
+	}
+	// Return a copy to prevent external mutation.
+	cp := *room
+	return &cp, nil
+}
+
+func (r *MemoryRoomRepository) GetByCode(ctx context.Context, code string) (*Room, error) {
+	r.mu.RLock()
+	id, ok := r.byCode[code]
+	if !ok {
+		r.mu.RUnlock()
+		return nil, ErrRoomNotFound
+	}
+	room := r.byID[id]
+	r.mu.RUnlock()
+	if room == nil {
+		return nil, ErrRoomNotFound
+	}
+	cp := *room
+	return &cp, nil
+}
+
+func (r *MemoryRoomRepository) UpdateLock(ctx context.Context, id string, locked bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	room, ok := r.byID[id]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	room.IsLocked = locked
+	return nil
+}
+
+func (r *MemoryRoomRepository) UpdateMemberCount(ctx context.Context, id string, delta int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	room, ok := r.byID[id]
+	if !ok {
+		// Room may have already been cleaned up — not fatal.
+		return nil
+	}
+	room.MemberCount += delta
+	if room.MemberCount < 0 {
+		room.MemberCount = 0
+	}
+	return nil
+}
+
+func (r *MemoryRoomRepository) Delete(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	room, ok := r.byID[id]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	delete(r.byCode, room.RoomCode)
+	delete(r.byID, id)
+	return nil
+}
+
+func (r *MemoryRoomRepository) DeleteExpired(ctx context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	var count int64
+	for id, room := range r.byID {
+		if room.ExpiresAt != nil && now.After(*room.ExpiresAt) {
+			delete(r.byCode, room.RoomCode)
+			delete(r.byID, id)
+			count++
 		}
-		return nil, err
 	}
-
-	room.OwnerID = ownerID
-	return room, nil
-}
-
-func (r *PostgresRoomRepository) UpdateLock(ctx context.Context, id string, locked bool) error {
-	query := `UPDATE rooms SET is_locked = $1 WHERE id = $2`
-	res, err := r.db.Pool.Exec(ctx, query, locked, id)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return ErrRoomNotFound
-	}
-	return nil
-}
-
-func (r *PostgresRoomRepository) UpdateMemberCount(ctx context.Context, id string, delta int) error {
-	query := `UPDATE rooms SET member_count = GREATEST(0, member_count + $1) WHERE id = $2`
-	res, err := r.db.Pool.Exec(ctx, query, delta, id)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return ErrRoomNotFound
-	}
-	return nil
-}
-
-func (r *PostgresRoomRepository) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM rooms WHERE id = $1`
-	res, err := r.db.Pool.Exec(ctx, query, id)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return ErrRoomNotFound
-	}
-	return nil
-}
-
-func (r *PostgresRoomRepository) DeleteExpired(ctx context.Context) (int64, error) {
-	query := `DELETE FROM rooms WHERE expires_at IS NOT NULL AND expires_at < NOW()`
-	res, err := r.db.Pool.Exec(ctx, query)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected(), nil
+	return count, nil
 }

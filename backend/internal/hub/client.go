@@ -10,42 +10,35 @@ import (
 )
 
 const (
-	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer (128 KB for signaling SDP/ICE/key exchange)
-	maxMessageSize = 128 * 1024
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 128 * 1024 // 128 KB
 )
 
 type Client struct {
-	ID     string
-	RoomID string
-	Conn   *websocket.Conn
-	Send   chan []byte
-	Hub    *Hub
-	closed atomic.Bool
+	ID        string
+	RoomID    string
+	Conn      *websocket.Conn
+	Send      chan []byte
+	Hub       *Hub
+	closed    atomic.Bool
 	closeOnce sync.Once
-	logger zerolog.Logger
+	logger    zerolog.Logger
 }
 
-func NewClient(id string, roomID string, conn *websocket.Conn, hub *Hub, logger zerolog.Logger) *Client {
+func NewClient(id, roomID string, conn *websocket.Conn, h *Hub, logger zerolog.Logger) *Client {
 	return &Client{
 		ID:     id,
 		RoomID: roomID,
 		Conn:   conn,
 		Send:   make(chan []byte, 256),
-		Hub:    hub,
+		Hub:    h,
 		logger: logger.With().Str("client_id", id).Str("room_id", roomID).Logger(),
 	}
 }
 
-// ReadPump pumps messages from the websocket connection to the hub.
+// ReadPump reads messages from the WebSocket and forwards them to the Hub.
 func (c *Client) ReadPump() {
 	defer func() {
 		c.Hub.Unregister <- c
@@ -68,23 +61,21 @@ func (c *Client) ReadPump() {
 			break
 		}
 
-		// Process signaling packet
 		msg, err := Deserialize(payload)
 		if err != nil {
-			c.logger.Error().Err(err).Msg("Failed to deserialize signal message")
+			c.logger.Error().Err(err).Msg("Failed to deserialise signal message")
 			continue
 		}
 
-		// Enforce Client ID alignment
+		// Always enforce the authenticated identity — never trust client-supplied IDs.
 		msg.FromID = c.ID
 		msg.RoomID = c.RoomID
 
-		// Pass message to Hub
 		c.Hub.Broadcast <- msg
 	}
 }
 
-// WritePump pumps messages from the hub to the websocket connection.
+// WritePump drains the Send channel and writes messages to the WebSocket.
 func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -97,7 +88,7 @@ func (c *Client) WritePump() {
 		case message, ok := <-c.Send:
 			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
+				// Hub closed the channel — send a clean close frame.
 				_ = c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -108,7 +99,7 @@ func (c *Client) WritePump() {
 			}
 			_, _ = w.Write(message)
 
-			// Add queued chat messages to the current websocket message if any.
+			// Drain any pending messages into the same WebSocket frame (newline-delimited).
 			n := len(c.Send)
 			for i := 0; i < n; i++ {
 				_, _ = w.Write([]byte{'\n'})
@@ -122,31 +113,28 @@ func (c *Client) WritePump() {
 		case <-ticker.C:
 			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.logger.Debug().Err(err).Msg("Failed to send ping heartbeat")
+				c.logger.Debug().Err(err).Msg("Ping failed")
 				return
 			}
 		}
 	}
 }
 
+// SendJSON serialises msg and queues it on the Send channel.
+// Safe to call from any goroutine. Drops the message if the channel is full.
 func (c *Client) SendJSON(msg *SignalMessage) {
-	defer func() {
-		if r := recover(); r != nil {
-			c.logger.Warn().Interface("recover", r).Msg("SendJSON recovered from panic (closed channel)")
-		}
-	}()
 	if c.closed.Load() {
 		return
 	}
 	data, err := msg.Serialize()
 	if err != nil {
-		c.logger.Error().Err(err).Msg("Failed to serialize message to client")
+		c.logger.Error().Err(err).Msg("Failed to serialise message")
 		return
 	}
 	select {
 	case c.Send <- data:
 	default:
-		c.logger.Warn().Msg("Send channel blocked, dropping message")
+		c.logger.Warn().Msg("Send channel full — dropping message")
 	}
 }
 

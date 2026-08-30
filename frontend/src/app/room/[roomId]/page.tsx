@@ -99,77 +99,81 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
     };
   }, []);
 
-  // Initialize and connect to signaling
+  // Initialize and connect to signaling.
+  // roomId can be a UUID (after create/join) or an 8-char room code (shared link).
+  // All other refs (token, roomRole, joinRoom, connectSignaling, disconnectRoom, showToast)
+  // are stable Zustand actions/selectors — only roomId needs to be in deps.
   useEffect(() => {
     if (!roomId) return;
     let cancelled = false;
-    
+
     const initialize = async () => {
+      // Happy path: token already present in Zustand state or sessionStorage.
       const activeToken = token || sessionStorage.getItem(`token_${roomId}`);
       const activeRole = roomRole || (sessionStorage.getItem(`role_${roomId}`) as 'owner' | 'member');
 
       if (activeToken && activeRole) {
         sessionStorage.setItem(`token_${roomId}`, activeToken);
         sessionStorage.setItem(`role_${roomId}`, activeRole);
-
         await connectSignaling(roomId, activeToken, activeRole);
-        if (cancelled) return;
-      } else {
-        try {
-          let targetCode = roomId;
-          
-          if (roomId.length === 36) {
-            const apiBase = typeof window !== 'undefined'
-              ? (window.location.host.includes('localhost') || window.location.host.includes('127.0.0.1')
-                ? `${window.location.protocol}//${(window.location.host.includes(':3000') || window.location.host.includes(':3001')) ? window.location.hostname + ':8080' : window.location.host}/api/v1`
-                : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1')
-              : 'http://localhost:8080/api/v1';
+        return;
+      }
 
-            const res = await fetch(`${apiBase}/rooms/${roomId}`);
+      // No token — resolve room code then join fresh.
+      try {
+        showToast({
+          type: 'info',
+          title: 'Resolving Secure Room...',
+          message: 'Negotiating keys and establishing guest handshake...',
+        });
+
+        // joinRoom expects a room CODE. If we have a UUID, ask the server for
+        // the code via the in-memory GET /rooms/:id endpoint (no DB required).
+        let targetCode = roomId;
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId);
+
+        if (isUUID) {
+          try {
+            const { getApiBase } = await import('@/stores/roomStore');
+            const res = await fetch(`${getApiBase()}/rooms/${roomId}`);
             if (res.ok) {
-              const metadata = await res.json();
-              if (metadata && metadata.room_code) {
-                targetCode = metadata.room_code;
-              }
+              const meta = await res.json();
+              if (meta?.room_code) targetCode = meta.room_code;
             }
+          } catch {
+            // Non-fatal — try the roomId value directly as a code below.
           }
-
-          showToast({
-            type: "info",
-            title: "Resolving Secure Room...",
-            message: "Negotiating keys and establishing guest handshake...",
-          });
-
-          const realRoomId = await joinRoom(targetCode);
-          if (cancelled) return;
-          
-          const newState = useRoomStore.getState();
-          const newToken = newState.token;
-          const newRole = newState.roomRole;
-
-          if (newToken && newRole) {
-            sessionStorage.setItem(`token_${realRoomId}`, newToken);
-            sessionStorage.setItem(`role_${realRoomId}`, newRole);
-
-            if (window.location.pathname !== `/room/${realRoomId}`) {
-              window.history.replaceState({}, '', `/room/${realRoomId}${window.location.hash}`);
-            }
-
-            await connectSignaling(realRoomId, newToken, newRole);
-          } else {
-            throw new Error("Failed to retrieve join tokens from server");
-          }
-        } catch (err: unknown) {
-          if (cancelled) return;
-          showToast({
-            type: "error",
-            title: "Access Denied",
-            message: err instanceof Error ? err.message : "Failed to join room. Room may be locked, expired, or full.",
-          });
-          setTimeout(() => {
-            if (!cancelled) window.location.href = "/";
-          }, 3000);
         }
+
+        if (cancelled) return;
+
+        const realRoomId = await joinRoom(targetCode);
+        if (cancelled) return;
+
+        const { token: newToken, roomRole: newRole } = useRoomStore.getState();
+
+        if (newToken && newRole) {
+          sessionStorage.setItem(`token_${realRoomId}`, newToken);
+          sessionStorage.setItem(`role_${realRoomId}`, newRole);
+
+          if (window.location.pathname !== `/room/${realRoomId}`) {
+            window.history.replaceState({}, '', `/room/${realRoomId}${window.location.hash}`);
+          }
+
+          await connectSignaling(realRoomId, newToken, newRole);
+        } else {
+          throw new Error('Failed to retrieve join tokens from server');
+        }
+      } catch (err: unknown) {
+        if (cancelled) return;
+        showToast({
+          type: 'error',
+          title: 'Access Denied',
+          message: err instanceof Error ? err.message : 'Failed to join room. Room may be locked, expired, or full.',
+        });
+        setTimeout(() => {
+          if (!cancelled) window.location.href = '/';
+        }, 3000);
       }
     };
 
@@ -179,7 +183,9 @@ const [isQRModalOpen, setIsQRModalOpen] = useState(false);
       cancelled = true;
       disconnectRoom();
     };
-  }, [roomId]);
+  // Only roomId is needed — connectSignaling, disconnectRoom, joinRoom, roomRole,
+  // showToast, token are stable Zustand actions/selectors (stable identity across renders).
+  }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive latest pending transfer inline (not via useEffect to avoid cascading renders)
   const latestPending = pendingTransfers.length > 0 ? pendingTransfers[pendingTransfers.length - 1] : null;

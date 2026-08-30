@@ -29,8 +29,9 @@ self.addEventListener('message', async (event: MessageEvent) => {
 
       const hash = hasher.digest();
       self.postMessage({ type: 'success', hash });
-    } catch (error: any) {
-      self.postMessage({ type: 'error', error: error.message || 'SHA-256 hashing failed' });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'SHA-256 hashing failed';
+      self.postMessage({ type: 'error', error: msg });
     }
   }
 });
