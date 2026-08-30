@@ -10,6 +10,7 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'fai
 export interface WebRTCEvents {
   onStateChange: (state: ConnectionState) => void;
   onMessage: (label: string, data: ArrayBuffer | string) => void;
+  onControlChannelOpen?: () => void;
 }
 
 export class PeerConnectionManager {
@@ -201,9 +202,14 @@ export class PeerConnectionManager {
 
   private setupControlChannel(dc: RTCDataChannel): void {
     this.controlChannel = dc;
-    dc.onopen = () => {
+    const handleOpen = () => {
       console.log('[PeerConnectionManager] Control channel OPENED for peer:', this.peerId);
+      this.events.onControlChannelOpen?.();
     };
+    dc.onopen = handleOpen;
+    if (dc.readyState === 'open') {
+      handleOpen();
+    }
     dc.onclose = () => {
       console.log('[PeerConnectionManager] Control channel CLOSED for peer:', this.peerId);
     };

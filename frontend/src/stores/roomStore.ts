@@ -170,6 +170,197 @@ const flushSignalingQueue = async (peerId: string) => {
 };
 
 export const useRoomStore = create<RoomState>((set, get) => {
+  const finalizeKeyExchange = async (from: string, derivedRoomKey: CryptoKey, roomId: string) => {
+    set((s) => {
+      const updatedPeers = new Map(s.peers);
+      const peer = updatedPeers.get(from);
+      if (peer) {
+        peer.roomKey = derivedRoomKey;
+        peer.status = 'connected';
+        if (!peer.transferCoordinator && peer.pcManager) {
+          const coordinator = new FileTransferCoordinator(
+            peer.pcManager,
+            derivedRoomKey,
+            roomId,
+            {
+              onProgress: (progress) => {
+                set((s) => {
+                  const updatedTransfers = new Map(s.activeTransfers);
+                  const current = updatedTransfers.get(progress.transferId);
+                  if (current) {
+                    current.progress = progress.progress;
+                    current.speedBytesPerSec = progress.speedBytesPerSec;
+                    current.etaSec = progress.etaSec;
+                    current.status = progress.progress >= 100 ? 'completed' : 'transferring';
+                    updatedTransfers.set(progress.transferId, current);
+                  }
+                  return { activeTransfers: updatedTransfers };
+                });
+              },
+              onIncomingTransferRequest: (trans) => {
+                set((s) => ({
+                  pendingTransfers: [...s.pendingTransfers, trans],
+                }));
+              },
+              onIncomingTransfer: async (trans) => {
+                set((s) => {
+                  const updatedTransfers = new Map(s.activeTransfers);
+                  updatedTransfers.set(trans.transferId, {
+                    peerId: from,
+                    fileName: trans.fileName,
+                    sizeBytes: trans.sizeBytes,
+                    fileType: trans.fileType,
+                    direction: 'incoming',
+                    progress: 0,
+                    speedBytesPerSec: 0,
+                    etaSec: 0,
+                    status: 'pending',
+                  });
+                  const fileMsg: ChatMessage = {
+                    id: `msg-${trans.transferId}`,
+                    peerId: from,
+                    senderName: from.substring(0, 8),
+                    timestamp: Date.now(),
+                    type: 'file',
+                    transferId: trans.transferId,
+                    fileName: trans.fileName,
+                    fileSize: trans.sizeBytes,
+                    fileType: trans.fileType,
+                  };
+                  return { 
+                    activeTransfers: updatedTransfers,
+                    messages: [...s.messages, fileMsg]
+                  };
+                });
+                useUIStore.getState().showToast({
+                  type: 'info',
+                  title: 'Incoming File',
+                  message: `Receiving "${trans.fileName}" (${(trans.sizeBytes / 1024 / 1024).toFixed(1)} MB)...`,
+                });
+
+                if (roomId) {
+                  try {
+                    await saveMessage({
+                      roomId,
+                      peerId: from,
+                      encryptedText: JSON.stringify({
+                        type: trans.fileType,
+                        name: trans.fileName,
+                        size: trans.sizeBytes,
+                      }),
+                      iv: '',
+                      timestamp: Date.now(),
+                    });
+                  } catch (err) {
+                    console.warn('Failed to persist incoming file message:', err);
+                  }
+                }
+              },
+              onComplete: async (tid, blob, name) => {
+                const blobKey: object = {};
+                transferBlobs.set(blobKey, blob);
+                transferBlobKeys.set(tid, blobKey);
+
+                set((s) => {
+                  const updatedTransfers = new Map(s.activeTransfers);
+                  const current = updatedTransfers.get(tid);
+                  if (current) {
+                    current.progress = 100;
+                    current.status = 'completed';
+                    updatedTransfers.set(tid, current);
+                  }
+                  return { activeTransfers: updatedTransfers };
+                });
+                useUIStore.getState().showToast({
+                  type: 'success',
+                  title: 'Transfer Completed',
+                  message: `Successfully received "${name}".`,
+                });
+              },
+              onFailed: (tid, error) => {
+                console.error('[transfer.onFailed] tid=', tid.substring(0, 8), 'error=', error);
+                set((s) => {
+                  const updatedTransfers = new Map(s.activeTransfers);
+                  const current = updatedTransfers.get(tid);
+                  if (current) {
+                    current.status = 'failed';
+                    updatedTransfers.set(tid, current);
+                  }
+                  return { activeTransfers: updatedTransfers };
+                });
+                useUIStore.getState().showToast({
+                  type: 'error',
+                  title: 'Transfer Failed',
+                  message: error,
+                });
+              }
+            }
+          );
+          peer.transferCoordinator = coordinator;
+        }
+      }
+      return { peers: updatedPeers };
+    });
+
+    const currentMessages = get().messages;
+    if (currentMessages.length > 0) {
+      const recentMessages = currentMessages.slice(-50);
+      const historyBundle = JSON.stringify({
+        type: 'history-bundle',
+        messages: recentMessages,
+      });
+      let attempts = 0;
+      const trySend = () => {
+        const peerObj = get().peers.get(from);
+        if (peerObj?.pcManager?.controlChannel?.readyState === 'open') {
+          peerObj.pcManager.controlChannel.send(historyBundle);
+        } else if (attempts < 10) {
+          attempts++;
+          setTimeout(trySend, 150);
+        }
+      };
+      trySend();
+    }
+
+    if (get().messages.length === 0) {
+      const cachedMessages = await getRoomMessages(roomId);
+      const decryptedMessages: ChatMessage[] = [];
+      for (const msg of cachedMessages) {
+        try {
+          if (msg.iv) {
+            const dec = await decryptText(derivedRoomKey, msg.encryptedText, msg.iv);
+            decryptedMessages.push({
+              id: `msg-${msg.timestamp}-${msg.peerId}`,
+              peerId: msg.peerId,
+              senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
+              text: dec,
+              timestamp: msg.timestamp,
+            });
+          } else {
+            const parsed = JSON.parse(msg.encryptedText);
+            decryptedMessages.push({
+              id: `msg-${msg.timestamp}-${msg.peerId}`,
+              peerId: msg.peerId,
+              senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
+              timestamp: msg.timestamp,
+              type: 'file',
+              fileName: parsed.name,
+              fileSize: parsed.size,
+              fileType: parsed.type,
+            });
+          }
+        } catch {
+          // Ignore key mismatch on old room history
+        }
+      }
+      if (decryptedMessages.length > 0) {
+        set((s) => ({
+          messages: [...decryptedMessages, ...s.messages],
+        }));
+      }
+    }
+  };
+
   // Local function to spin up direct peer WebRTC connection
   const setupWebRTCPeer = async (remotePeerId: string, isInitiator: boolean) => {
     const { roomId, token, signaling, localX25519Pair, localEd25519Pair } = get();
@@ -247,7 +438,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
             const peer = updatedPeers.get(remotePeerId);
             if (peer) {
               if (state === 'connected') {
-                peer.status = 'connected';
+                peer.status = peer.roomKey ? 'connected' : 'key-exchanging';
               } else if (state === 'failed') {
                 peer.status = 'failed';
                 drainSignalingQueue(remotePeerId);
@@ -260,6 +451,37 @@ export const useRoomStore = create<RoomState>((set, get) => {
             return {};
           });
         },
+        onControlChannelOpen: async () => {
+          console.log('[roomStore] Control channel OPENED for remote peer:', remotePeerId);
+          const currentPeer = get().peers.get(remotePeerId);
+          if (currentPeer) {
+            if (currentPeer.roomKey) {
+              set((s) => {
+                const updated = new Map(s.peers);
+                const p = updated.get(remotePeerId);
+                if (p) p.status = 'connected';
+                return { peers: updated };
+              });
+            } else {
+              const { localX25519Pair, localEd25519Pair, roomId, signaling } = get();
+              if (localX25519Pair && localEd25519Pair && roomId) {
+                try {
+                  const packet = await prepareKeyExchange(localX25519Pair, localEd25519Pair);
+                  const packetStr = JSON.stringify(packet);
+                  signaling?.send('key-exchange', roomId, remotePeerId, { payload: packetStr });
+                  if (currentPeer.pcManager?.controlChannel?.readyState === 'open') {
+                    currentPeer.pcManager.controlChannel.send(JSON.stringify({
+                      type: 'key-exchange',
+                      payload: packetStr,
+                    }));
+                  }
+                } catch (e) {
+                  console.warn('[roomStore] Failed sending control channel key-exchange fallback:', e);
+                }
+              }
+            }
+          }
+        },
         onMessage: async (label, data) => {
           try {
             // Forward data to the FileTransferCoordinator if available
@@ -269,6 +491,22 @@ export const useRoomStore = create<RoomState>((set, get) => {
 
             if (label === 'control' && typeof data === 'string') {
               const msg = JSON.parse(data);
+
+              // Handle direct P2P key-exchange packet
+              if (msg.type === 'key-exchange' && typeof msg.payload === 'string') {
+                console.log('[roomStore] Received direct P2P key-exchange from:', remotePeerId);
+                const { localX25519Pair, roomId } = get();
+                if (localX25519Pair && roomId) {
+                  try {
+                    const packet: KeyExchangePacket = JSON.parse(msg.payload);
+                    const derivedRoomKey = await completeKeyExchange(localX25519Pair.privateKey, packet, roomId);
+                    await finalizeKeyExchange(remotePeerId, derivedRoomKey, roomId);
+                  } catch (err) {
+                    console.error('[roomStore] Direct P2P key-exchange failed:', err);
+                  }
+                }
+                return;
+              }
 
               // Handle chat messages
               if (msg.type === 'chat' && peerObj?.roomKey) {
@@ -645,9 +883,9 @@ export const useRoomStore = create<RoomState>((set, get) => {
         client.on('key-exchange', async ({ from, payload }) => {
           console.log('[roomStore] key-exchange from:', from);
           queueOrExecuteSignaling(from, async () => {
-            const { localX25519Pair } = get();
-            if (!localX25519Pair) {
-              console.warn('[roomStore] key-exchange: no localX25519Pair');
+            const { localX25519Pair, roomId } = get();
+            if (!localX25519Pair || !roomId) {
+              console.warn('[roomStore] key-exchange: missing localX25519Pair or roomId');
               return;
             }
 
@@ -660,211 +898,9 @@ export const useRoomStore = create<RoomState>((set, get) => {
                 roomId
               );
               console.log('[roomStore] Key exchange completed for:', from);
-
-              set((s) => {
-                const updatedPeers = new Map(s.peers);
-                const peer = updatedPeers.get(from);
-                if (peer) {
-                  peer.roomKey = derivedRoomKey;
-                  peer.status = 'connected';
-                  const coordinator = new FileTransferCoordinator(
-                    peer.pcManager!,
-                    derivedRoomKey,
-                    roomId,
-                    {
-                      onProgress: (progress) => {
-                        set((s) => {
-                          const updatedTransfers = new Map(s.activeTransfers);
-                          const current = updatedTransfers.get(progress.transferId);
-                          if (current) {
-                            current.progress = progress.progress;
-                            current.speedBytesPerSec = progress.speedBytesPerSec;
-                            current.etaSec = progress.etaSec;
-                            current.status = progress.progress >= 100 ? 'completed' : 'transferring';
-                            updatedTransfers.set(progress.transferId, current);
-                          }
-                          return { activeTransfers: updatedTransfers };
-                        });
-                      },
-                      onIncomingTransferRequest: (trans) => {
-                        set((s) => ({
-                          pendingTransfers: [...s.pendingTransfers, trans],
-                        }));
-                      },
-                      onIncomingTransfer: async (trans) => {
-                        set((s) => {
-                          const updatedTransfers = new Map(s.activeTransfers);
-                          updatedTransfers.set(trans.transferId, {
-                            peerId: from,
-                            fileName: trans.fileName,
-                            sizeBytes: trans.sizeBytes,
-                            fileType: trans.fileType,
-                            direction: 'incoming',
-                            progress: 0,
-                            speedBytesPerSec: 0,
-                            etaSec: 0,
-                            status: 'pending',
-                          });
-                          const fileMsg: ChatMessage = {
-                            id: `msg-${trans.transferId}`,
-                            peerId: from,
-                            senderName: from.substring(0, 8),
-                            timestamp: Date.now(),
-                            type: 'file',
-                            transferId: trans.transferId,
-                            fileName: trans.fileName,
-                            fileSize: trans.sizeBytes,
-                            fileType: trans.fileType,
-                          };
-                          return { 
-                            activeTransfers: updatedTransfers,
-                            messages: [...s.messages, fileMsg]
-                          };
-                        });
-                        useUIStore.getState().showToast({
-                          type: 'info',
-                          title: 'Incoming File',
-                          message: `Receiving "${trans.fileName}" (${(trans.sizeBytes / 1024 / 1024).toFixed(1)} MB)...`,
-                        });
-
-                        const roomId = get().roomId;
-                        if (roomId) {
-                          try {
-                            await saveMessage({
-                              roomId,
-                              peerId: from,
-                              encryptedText: JSON.stringify({
-                                type: trans.fileType,
-                                name: trans.fileName,
-                                size: trans.sizeBytes,
-                              }),
-                              iv: '',
-                              timestamp: Date.now(),
-                            });
-                          } catch (err) {
-                            console.warn('Failed to persist incoming file message:', err);
-                          }
-                        }
-                      },
-                      onComplete: async (tid, blob, name) => {
-                        const blobKey: object = {};
-                        transferBlobs.set(blobKey, blob);
-                        transferBlobKeys.set(tid, blobKey);
-
-                        set((s) => {
-                          const updatedTransfers = new Map(s.activeTransfers);
-                          const current = updatedTransfers.get(tid);
-                          if (current) {
-                            current.progress = 100;
-                            current.status = 'completed';
-                            updatedTransfers.set(tid, current);
-                          }
-                          return { activeTransfers: updatedTransfers };
-                        });
-                        useUIStore.getState().showToast({
-                          type: 'success',
-                          title: 'Transfer Completed',
-                          message: `Successfully received "${name}".`,
-                        });
-                      },
-                      onFailed: (tid, error) => {
-                        console.error('[transfer.onFailed] tid=', tid.substring(0, 8), 'error=', error);
-                        set((s) => {
-                          const updatedTransfers = new Map(s.activeTransfers);
-                          const current = updatedTransfers.get(tid);
-                          if (current) {
-                            current.status = 'failed';
-                            updatedTransfers.set(tid, current);
-                          }
-                          return { activeTransfers: updatedTransfers };
-                        });
-                        useUIStore.getState().showToast({
-                          type: 'error',
-                          title: 'Transfer Failed',
-                          message: error,
-                        });
-                      }
-                    }
-                  );
-                  peer.transferCoordinator = coordinator;
-                }
-                return { peers: updatedPeers };
-              });
-
-              // Send recent history to the newly connected peer.
-              // The control channel may not be 'open' yet at the exact moment
-              // of key-exchange completion, so we retry a few times.
-              const currentMessages = get().messages;
-              if (currentMessages.length > 0) {
-                const recentMessages = currentMessages.slice(-50);
-                const historyBundle = JSON.stringify({
-                  type: 'history-bundle',
-                  messages: recentMessages,
-                });
-                let attempts = 0;
-                const trySend = () => {
-                  const peerObj = get().peers.get(from);
-                  if (peerObj?.pcManager?.controlChannel?.readyState === 'open') {
-                    peerObj.pcManager.controlChannel.send(historyBundle);
-                  } else if (attempts < 10) {
-                    attempts++;
-                    setTimeout(trySend, 150);
-                  }
-                };
-                trySend();
-              }
-
-              // Load persisted history only once (messages array is empty)
-              if (get().messages.length === 0) {
-                const cachedMessages = await getRoomMessages(roomId);
-                const decryptedMessages: ChatMessage[] = [];
-                for (const msg of cachedMessages) {
-                  try {
-                    if (msg.iv) {
-                      // Encrypted text message
-                      const text = await decryptText(derivedRoomKey, msg.encryptedText, msg.iv);
-                      decryptedMessages.push({
-                        id: String(msg.id),
-                        peerId: msg.peerId,
-                        senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
-                        text,
-                        timestamp: msg.timestamp,
-                      });
-                    } else {
-                      // File notification message (metadata stored as JSON)
-                      const meta = JSON.parse(msg.encryptedText);
-                      decryptedMessages.push({
-                        id: String(msg.id),
-                        peerId: msg.peerId,
-                        senderName: msg.peerId === get().peerId ? 'You' : msg.peerId.substring(0, 8),
-                        type: 'file',
-                        fileName: meta.name,
-                        fileSize: meta.size,
-                        fileType: meta.type,
-                        timestamp: msg.timestamp,
-                      });
-                    }
-                  } catch (err) {
-                    // skip undecryptable or malformed messages
-                    console.warn('Skipping unrecoverable message from IndexedDB:', err);
-                  }
-                }
-                if (decryptedMessages.length > 0) {
-                  set((s) => {
-                    const oldIds = new Set(decryptedMessages.map(m => m.id));
-                    const liveMessages = s.messages.filter(m => !oldIds.has(m.id));
-                    return { messages: [...decryptedMessages, ...liveMessages] };
-                  });
-                }
-              }
-
+              await finalizeKeyExchange(from, derivedRoomKey, roomId);
             } catch (err) {
-              console.error("Complete key exchange failure:", err);
-              useUIStore.getState().showToast({
-                type: 'error',
-                title: 'E2EE Key Exchange Failed',
-                message: 'A secure peer-to-peer key exchange failed.',
-              });
+              console.error('Complete key exchange failure:', err);
             }
           });
         });
