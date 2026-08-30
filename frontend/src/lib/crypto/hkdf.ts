@@ -17,7 +17,10 @@ export async function deriveRoomKey(
     ['deriveKey']
   );
 
-  // Derive the room key (AES-GCM 256 bits)
+  // Derive the room key (AES-GCM 256 bits).
+  // NON-extractable: the room key must stay opaque inside the Web Crypto
+  // subsystem. Making it extractable would allow any XSS-injected script to
+  // call exportKey() and trivially decrypt all messages.
   return await window.crypto.subtle.deriveKey(
     {
       name: 'HKDF',
@@ -30,7 +33,7 @@ export async function deriveRoomKey(
       name: 'AES-GCM',
       length: 256,
     },
-    true, // Extractable
+    false, // NOT extractable — opaque key, cannot be exported
     ['encrypt', 'decrypt']
   );
 }
