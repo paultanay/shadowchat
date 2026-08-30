@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,9 +39,9 @@ type RoomRepository interface {
 // This satisfies the zero-knowledge invariant: the server holds only ephemeral
 // signaling metadata and never touches plaintext room content or keys.
 type MemoryRoomRepository struct {
-	mu       sync.RWMutex
-	byID     map[string]*Room
-	byCode   map[string]string // room_code → room id
+	mu     sync.RWMutex
+	byID   map[string]*Room
+	byCode map[string]string // room_code → room id
 }
 
 func NewMemoryRoomRepository() RoomRepository {
@@ -99,6 +100,13 @@ func (r *MemoryRoomRepository) GetByCode(ctx context.Context, code string) (*Roo
 	r.mu.RLock()
 	id, ok := r.byCode[code]
 	if !ok {
+		// Fallback: check if 'code' is directly a room ID (UUID) in byID map
+		roomByID, okID := r.byID[strings.ToLower(code)]
+		if okID && roomByID != nil {
+			cp := *roomByID
+			r.mu.RUnlock()
+			return &cp, nil
+		}
 		r.mu.RUnlock()
 		return nil, ErrRoomNotFound
 	}
