@@ -1727,7 +1727,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - NATS_URL=nats://nats:4222
-      - DATABASE_URL=postgres://shadow:secret@postgres:5432/shadowchat?sslmode=disable
+      - DATABASE_URL=postgres://<db_user>:<db_password>@postgres:5432/shadowchat?sslmode=disable
       - TURN_SECRET=${TURN_SECRET}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
