@@ -379,8 +379,8 @@ Set these in Cloud Run (under "Variables & Secrets"):
 
 ```env
 # Required
-DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/shadowchat?sslmode=require
-REDIS_URL=redis://default:pass@xxx.upstash.io:6379
+DATABASE_URL=postgresql://<db_user>:<db_password>@<db_host>/shadowchat?sslmode=require
+REDIS_URL=rediss://default:<redis_password>@<redis_host>:6379
 JWT_SECRET=<generate with: openssl rand -hex 32>
 TURN_SECRET=<generate with: openssl rand -hex 32>
 ENV=production
