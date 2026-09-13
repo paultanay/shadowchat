@@ -7,7 +7,12 @@ WORKDIR /app
 
 # Copy package files
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm retries transient registry and connection failures. Audit reporting is
+# deliberately disabled because it is not part of the deterministic install.
+RUN npm ci --no-audit --fund=false \
+    --fetch-retries=5 \
+    --fetch-retry-mintimeout=1000 \
+    --fetch-retry-maxtimeout=60000
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -56,6 +61,6 @@ ENV HOSTNAME="0.0.0.0"
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/next-config-js/output
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3000/ || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/ || exit 1
 
 CMD ["node", "server.js"]
