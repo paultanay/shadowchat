@@ -3,10 +3,18 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Copy dependency files
+# Copy dependency files. Disabling Go's HTTP/2 client avoids intermittent
+# stream-reset failures from proxies used by some Docker Desktop networks.
+# The retry loop makes transient registry and proxy failures non-fatal.
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod/ \
-    go mod download
+ENV GODEBUG=http2client=0 \
+    GOPROXY=https://proxy.golang.org,direct
+RUN attempt=1; \
+    until go mod download; do \
+      if [ "$attempt" -ge 5 ]; then exit 1; fi; \
+      sleep "$((attempt * 5))"; \
+      attempt=$((attempt + 1)); \
+    done
 
 # Copy source code
 COPY . .
